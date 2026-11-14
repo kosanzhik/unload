@@ -1,29 +1,32 @@
 @import "tailwindcss";
 
-/* Design tokens from design/unload.pen */
+/* UNLOAD Autopilot design tokens — light, navy/blue/neutral */
 @theme {
-  --color-ink-900: #1e2823;
-  --color-ink-650: #53605a;
-  --color-ink-450: #7d8a83;
-  --color-canvas: #f7f8f3;
+  --color-ink-900: #0b1530;
+  --color-ink-700: #27324d;
+  --color-ink-500: #5b6782;
+  --color-ink-400: #8a94ab;
+  --color-canvas: #f5f7fb;
   --color-surface: #ffffff;
-  --color-soft: #eff1e9;
-  --color-line: #dbe0d8;
-  --color-lime-400: #ccf36c;
-  --color-lime-100: #f1f9db;
-  --color-coral-400: #ff896d;
-  --color-success: #246746;
-  --color-warning: #8b5517;
-  --color-warning-100: #fbf1e1;
-  --color-error: #b33e43;
-  --color-error-100: #fbeaea;
+  --color-soft: #eef1f7;
+  --color-line: #e1e6ef;
+  --color-brand: #2456f5;
+  --color-brand-700: #1a40c4;
+  --color-brand-50: #edf2ff;
+  --color-brand-100: #dbe5ff;
+  --color-navy: #0b1530;
+  --color-success: #13795b;
+  --color-success-50: #e7f6ef;
+  --color-warning: #a35a00;
+  --color-warning-50: #fff4e0;
+  --color-error: #b42335;
+  --color-error-50: #fdecee;
 
   --font-display: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
 
-  --radius-button: 14px;
-  --radius-card: 20px;
-  --radius-photo: 16px;
+  --shadow-card: 0 1px 2px rgba(11, 21, 48, 0.04), 0 4px 16px -6px rgba(11, 21, 48, 0.08);
+  --shadow-pop: 0 24px 60px -24px rgba(11, 21, 48, 0.35);
 }
 
 body {
@@ -35,25 +38,34 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
 @layer components {
   .field {
-    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink-900 outline-none transition placeholder:text-ink-450 focus:border-ink-900 focus:ring-2 focus:ring-lime-400;
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink-900 outline-none transition placeholder:text-ink-400 focus:border-brand focus:ring-4 focus:ring-brand-100;
   }
 }
 
-@keyframes toast-in {
+@keyframes rise {
   from {
     opacity: 0;
-    transform: translate(-50%, 8px);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    transform: none;
   }
 }
-.animate-toast {
-  animation: toast-in 0.2s ease-out;
+.animate-rise {
+  animation: rise 0.25s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

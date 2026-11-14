@@ -1,183 +1,291 @@
+import Link from "next/link";
 import {
   ArrowRight,
+  BadgeCheck,
+  Bell,
+  Bot,
   Camera,
   Check,
-  ClipboardCopy,
-  Layers,
-  ListChecks,
-  Plus,
-  Rocket,
+  ClipboardCheck,
+  FileVideo,
+  Handshake,
+  Lock,
+  Plug,
+  ScanSearch,
   ShieldCheck,
-  Store,
-  TrendingUp,
+  SlidersHorizontal,
 } from "lucide-react";
-import { Footer, SiteHeader } from "@/components/chrome";
-import { SampleButton } from "@/components/SampleButton";
-import { Badge, Button } from "@/components/ui";
+import { Logo } from "@/components/chrome";
+import { Button } from "@/components/ui";
 
-const img = (n: string) => `/demo/${n}.jpg`;
-
-export default function Home() {
+export default function Landing() {
   return (
-    <>
-      <SiteHeader />
+    <div className="min-h-dvh overflow-x-clip bg-canvas">
+      <header className="sticky top-0 z-40 border-b border-line bg-canvas/85 backdrop-blur">
+        <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-4 sm:px-6">
+          <Logo />
+          <nav className="hidden items-center gap-7 text-sm font-medium text-ink-500 md:flex">
+            <a href="#how" className="hover:text-ink-900">How it works</a>
+            <a href="#agent" className="hover:text-ink-900">The agent</a>
+            <a href="#marketplaces" className="hover:text-ink-900">Marketplaces</a>
+            <a href="#trust" className="hover:text-ink-900">Safety</a>
+          </nav>
+          <Button href="/dashboard" size="sm">
+            Open app
+          </Button>
+        </div>
+      </header>
+
       <main>
         <Hero />
+        <Flow />
+        <Agent />
+        <Proof />
+        <Markets />
         <Trust />
-        <HowItWorks />
-        <Preview />
-        <Modes />
-        <Comparison />
-        <Faq />
-        <BottomCta />
+        <Cta />
       </main>
-      <Footer />
-    </>
+
+      <footer className="border-t border-line">
+        <div className="mx-auto flex max-w-[1200px] flex-col gap-3 px-4 py-8 text-xs text-ink-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <p>UNLOAD isn&apos;t a marketplace and isn&apos;t affiliated with OLX, eBay, Meta or Mercari. You stay the seller.</p>
+          <p>© 2026 UNLOAD</p>
+        </div>
+      </footer>
+    </div>
   );
 }
 
-function Section({ id, className = "", children }: { id?: string; className?: string; children: React.ReactNode }) {
+function Section({ id, children, className = "" }: { id?: string; children: React.ReactNode; className?: string }) {
   return (
-    <section id={id} className={`scroll-mt-20 px-4 py-16 sm:px-6 sm:py-24 ${className}`}>
+    <section id={id} className={`scroll-mt-16 px-4 py-16 sm:px-6 sm:py-24 ${className}`}>
       <div className="mx-auto max-w-[1200px]">{children}</div>
     </section>
   );
 }
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
-  return <p className="text-xs font-bold tracking-widest text-ink-450">{children}</p>;
+  return <p className="text-xs font-bold tracking-[0.18em] text-brand uppercase">{children}</p>;
 }
 
 function Hero() {
   return (
-    <Section className="!pt-10 sm:!pt-16">
+    <Section className="!pt-12 sm:!pt-20">
       <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr]">
         <div>
-          <Badge tone="success">A smarter way to clear your space</Badge>
-          <h1 className="mt-5 text-[44px] leading-[1.02] font-extrabold sm:text-6xl lg:text-[72px]">
-            Sell the stuff you don&apos;t use.
+          <span className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs font-semibold text-ink-700">
+            <Bot className="size-3.5 text-brand" /> Your personal AI sales agent
+          </span>
+          <h1 className="mt-5 text-[44px] leading-[1.02] font-extrabold sm:text-6xl lg:text-7xl">
+            Take a photo.
             <br />
-            <span className="text-ink-450">Without the </span>
-            <span className="relative inline-block">
-              <span className="absolute inset-x-[-4px] bottom-1 h-[42%] -rotate-1 rounded-md bg-lime-400" />
-              <span className="relative">busywork.</span>
-            </span>
+            <span className="text-brand">Let AI sell it.</span>
           </h1>
-          <p className="mt-6 max-w-lg text-lg text-ink-650 sm:text-xl">
-            Add a few photos. Organize your items. Get ready-to-use listing drafts in one simple flow.
+          <p className="mt-6 max-w-xl text-lg text-ink-500 sm:text-xl">
+            UNLOAD drafts an honest listing, publishes it to marketplaces you connect, answers buyers within your rules, and only taps you when a decision is yours.
           </p>
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Button href="/upload" size="lg">
-              Start with photos <ArrowRight className="size-4" />
+            <Button href="/products/new" size="lg">
+              <Camera className="size-4" /> Sell an item
             </Button>
-            <SampleButton />
+            <Button href="/dashboard" size="lg" variant="secondary">
+              Try the demo workflow <ArrowRight className="size-4" />
+            </Button>
           </div>
-          <p className="mt-4 flex items-center gap-2 text-sm text-ink-450">
-            <ShieldCheck className="size-4" /> No account needed to try. You review everything before posting.
-          </p>
+          <p className="mt-4 text-sm text-ink-400">No account needed. Your data stays in your browser.</p>
         </div>
-        <HeroVisual />
+        <HeroChat />
       </div>
     </Section>
   );
 }
 
-function HeroVisual() {
-  const tiles = [
-    ["monitor", "Monitor"],
-    ["keyboard", "Keyboard"],
-    ["books", "Books × 4"],
-    ["headphones", "Headphones"],
-  ];
+function HeroChat() {
   return (
     <div className="relative">
-      <div className="grid grid-cols-2 gap-3 sm:gap-4">
-        {tiles.map(([n, l], i) => (
-          <figure
-            key={n}
-            className={`relative overflow-hidden rounded-[20px] bg-soft ${i % 2 ? "translate-y-6" : ""}`}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={img(n)} alt={l} className="aspect-[4/3] w-full object-cover" />
-            <figcaption className="absolute bottom-2 left-2 rounded-full bg-white/90 px-2.5 py-1 text-xs font-semibold">
-              {l}
-            </figcaption>
-          </figure>
-        ))}
-      </div>
-      <div className="relative z-10 mx-auto -mt-10 w-[88%] rounded-[20px] border border-line bg-surface p-4 shadow-[0_24px_60px_-24px_rgba(30,40,35,0.35)] sm:absolute sm:right-[-12px] sm:bottom-[-36px] sm:mt-0 sm:w-72">
-        <div className="flex items-center justify-between">
-          <p className="font-display font-bold">Your batch plan</p>
-          <Badge tone="lime">3 drafts</Badge>
+      <div className="absolute -inset-6 -z-10 rounded-[40px] bg-gradient-to-br from-brand-100 via-transparent to-transparent" />
+      <div className="rounded-3xl border border-line bg-surface p-4 shadow-[var(--shadow-pop)] sm:p-5">
+        <div className="flex items-center gap-3 border-b border-line pb-3">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/demo/monitor.jpg" alt="" className="size-11 rounded-xl object-cover" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-bold">27-inch monitor with stand</p>
+            <p className="text-xs text-ink-500">Asking $150 · Autopilot on</p>
+          </div>
+          <span className="inline-flex items-center gap-1 rounded-full bg-ink-900 px-2.5 py-1 text-[11px] font-semibold text-white">
+            <Lock className="size-3" /> min $130
+          </span>
         </div>
-        <ul className="mt-3 space-y-2 text-sm">
-          {[
-            ["Home-office bundle", "Monitor + keyboard"],
-            ["Over-ear headphones", "1 item"],
-            ["Books + desk lamp", "pairing is your call"],
-          ].map(([t, s]) => (
-            <li key={t} className="flex items-center gap-2.5 rounded-xl bg-soft px-3 py-2">
-              <Check className="size-4 text-success" />
-              <span className="font-semibold">{t}</span>
-              <span className="ml-auto truncate text-xs text-ink-450">{s}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-3 text-xs text-ink-450">Every draft stays editable</p>
+        <ol className="space-y-3 pt-4 text-sm">
+          <Msg who="buyer">Would you accept $120?</Msg>
+          <Msg who="ai">The seller is asking $150. I can offer $135 if that works for you.</Msg>
+          <Msg who="buyer">Does the HDMI port actually work?</Msg>
+          <Msg who="ai">That hasn&apos;t been verified yet. I&apos;ll ask the seller to check.</Msg>
+          <li className="flex items-center gap-2 rounded-xl bg-warning-50 px-3 py-2 text-xs font-semibold text-warning">
+            <FileVideo className="size-4" /> Task for you: test the HDMI port, add a short video
+          </li>
+          <Msg who="buyer">OK, $135 works. Can I see it tomorrow?</Msg>
+          <li className="flex items-center gap-2 rounded-xl bg-brand-50 px-3 py-2 text-xs font-semibold text-brand-700">
+            <Handshake className="size-4" /> Deal request: $135 · viewing tomorrow · waiting for your OK
+          </li>
+        </ol>
       </div>
     </div>
+  );
+}
+
+function Msg({ who, children }: { who: "buyer" | "ai"; children: React.ReactNode }) {
+  return (
+    <li className={who === "ai" ? "flex justify-end" : "flex"}>
+      <span className={who === "ai" ? "max-w-[85%] rounded-2xl rounded-tr-md bg-brand px-3.5 py-2 text-white" : "max-w-[85%] rounded-2xl rounded-tl-md border border-line bg-canvas px-3.5 py-2"}>
+        {who === "ai" && <span className="mb-0.5 flex items-center gap-1 text-[10px] font-semibold tracking-wide text-white/70 uppercase"><Bot className="size-3" /> AI agent</span>}
+        {children}
+      </span>
+    </li>
+  );
+}
+
+const STEPS = [
+  { icon: Camera, t: "Upload photos", s: "A few angles of the item. Several items, each with its own agent." },
+  { icon: ScanSearch, t: "Confirm the facts", s: "AI drafts the title, details and the few questions only you can answer." },
+  { icon: SlidersHorizontal, t: "Set your rules", s: "Asking price, a private minimum, how far the agent may negotiate." },
+  { icon: Plug, t: "Connect marketplaces", s: "Official APIs where they exist, ready-to-post drafts where they don't." },
+  { icon: Bot, t: "Approve & enable Autopilot", s: "Nothing goes live without you. Pick Manual, Assisted or Autopilot." },
+  { icon: Bell, t: "Get pinged for decisions", s: "Serious buyers, viewing requests, and questions the agent can't verify." },
+];
+
+function Flow() {
+  return (
+    <Section id="how" className="bg-surface">
+      <Eyebrow>How it works</Eyebrow>
+      <h2 className="mt-3 max-w-2xl text-4xl leading-tight font-extrabold sm:text-5xl">Six steps from shelf to sold. You do three of them.</h2>
+      <ol className="mt-12 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {STEPS.map((x, i) => (
+          <li key={x.t} className="rounded-2xl border border-line bg-canvas p-6">
+            <div className="flex items-center justify-between">
+              <span className="flex size-11 items-center justify-center rounded-xl bg-navy text-white">
+                <x.icon className="size-5" />
+              </span>
+              <span className="font-display text-sm font-bold text-ink-400">0{i + 1}</span>
+            </div>
+            <p className="mt-5 font-display text-lg font-bold">{x.t}</p>
+            <p className="mt-1.5 text-sm text-ink-500">{x.s}</p>
+          </li>
+        ))}
+      </ol>
+    </Section>
+  );
+}
+
+function Agent() {
+  const modes = [
+    { t: "Manual", s: "The agent drafts every reply. You approve each one." },
+    { t: "Assisted", s: "Routine answers go out. Price talk waits for you." },
+    { t: "Autopilot", s: "Routine answers and counteroffers inside your range go out. Deals still need you." },
+  ];
+  return (
+    <Section id="agent">
+      <div className="grid gap-12 lg:grid-cols-2">
+        <div>
+          <Eyebrow>One agent per item</Eyebrow>
+          <h2 className="mt-3 text-4xl leading-tight font-extrabold sm:text-5xl">It sells like you would. Within limits you set.</h2>
+          <ul className="mt-8 space-y-3">
+            {[
+              "Answers only from facts you verified. No invented features.",
+              "Negotiates between your asking price and a minimum it never reveals.",
+              "Spots serious buyers and viewing requests, then builds a Deal Request.",
+              "Escalates payment questions, off-platform requests, and anything uncertain.",
+            ].map((t) => (
+              <li key={t} className="flex gap-3">
+                <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-brand text-white">
+                  <Check className="size-3.5" strokeWidth={3} />
+                </span>
+                <span className="text-ink-700">{t}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="space-y-3">
+          {modes.map((m, i) => (
+            <div key={m.t} className={`rounded-2xl border p-5 ${i === 2 ? "border-navy bg-navy text-white" : "border-line bg-surface"}`}>
+              <p className="font-display text-lg font-bold">{m.t}</p>
+              <p className={i === 2 ? "mt-1 text-sm text-white/70" : "mt-1 text-sm text-ink-500"}>{m.s}</p>
+            </div>
+          ))}
+          <p className="px-1 text-sm text-ink-500">Final deal confirmation always stays with you, in every mode.</p>
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+function Proof() {
+  const steps = [
+    ["Buyer asks", "“Does the HDMI port actually work?”"],
+    ["Agent is honest", "“That hasn't been verified yet. I'll ask the seller.”"],
+    ["You check", "Test it, optionally attach a short video."],
+    ["Knowledge grows", "Saved as a verified fact; the agent reuses it for every buyer."],
+  ];
+  return (
+    <Section className="bg-navy text-white">
+      <p className="text-xs font-bold tracking-[0.18em] text-brand-100 uppercase">Living listing · Proof-to-deal</p>
+      <h2 className="mt-3 max-w-3xl text-4xl leading-tight font-extrabold sm:text-5xl">Every question answered once. Then never again.</h2>
+      <ol className="mt-12 grid gap-4 md:grid-cols-4">
+        {steps.map(([t, s], i) => (
+          <li key={t} className="rounded-2xl bg-white/[0.06] p-5 ring-1 ring-white/10">
+            <span className="font-display text-sm font-bold text-brand-100">0{i + 1}</span>
+            <p className="mt-3 font-display text-lg font-bold">{t}</p>
+            <p className="mt-1 text-sm text-white/70">{s}</p>
+          </li>
+        ))}
+      </ol>
+      <p className="mt-6 text-sm text-white/60">Evidence shows the item at the time it was recorded. UNLOAD never presents it as a guarantee.</p>
+    </Section>
+  );
+}
+
+function Markets() {
+  const rows = [
+    ["OLX Kazakhstan", "Official OAuth + Partner API: publish, status, messages", "Connected once API access is approved"],
+    ["eBay", "Export-ready drafts with item specifics", "Manual export"],
+    ["Facebook Marketplace", "No public listing API for individuals", "Manual export"],
+    ["Mercari", "No public listing API for individual sellers", "Manual export"],
+  ];
+  return (
+    <Section id="marketplaces" className="bg-surface">
+      <Eyebrow>Marketplaces</Eyebrow>
+      <h2 className="mt-3 max-w-2xl text-4xl leading-tight font-extrabold sm:text-5xl">Sell where buyers already are. No new marketplace.</h2>
+      <p className="mt-4 max-w-2xl text-ink-500">We show the real status of every integration. If a platform has no official API, we say so and give you a ready-to-post draft.</p>
+      <div className="mt-10 overflow-hidden rounded-2xl border border-line">
+        {rows.map(([n, d, s]) => (
+          <div key={n} className="grid gap-1 border-b border-line bg-canvas px-5 py-4 last:border-0 sm:grid-cols-[220px_1fr_auto] sm:items-center sm:gap-6">
+            <p className="font-semibold">{n}</p>
+            <p className="text-sm text-ink-500">{d}</p>
+            <p className="text-xs font-semibold text-ink-700">{s}</p>
+          </div>
+        ))}
+      </div>
+    </Section>
   );
 }
 
 function Trust() {
   const items = [
-    { icon: Layers, t: "Made for batches", s: "Five things or fifty, one flow" },
-    { icon: ListChecks, t: "Review before export", s: "Nothing leaves without your OK" },
-    { icon: Store, t: "You choose where to post", s: "Copy drafts to any platform" },
+    { icon: Lock, t: "Your minimum stays private", s: "A policy check blocks any reply that would reveal it or quote an unapproved price." },
+    { icon: ShieldCheck, t: "No invented facts", s: "Unknown? The agent says so and asks you. It never guesses condition or specs." },
+    { icon: ClipboardCheck, t: "No fake numbers", s: "No price predictions, demand scores, or “sells in 3 days” claims. Measured data is labeled as measured." },
+    { icon: BadgeCheck, t: "You close the deal", s: "Offers, viewings, and purchases become Deal Requests that only you can approve." },
   ];
   return (
-    <div className="border-y border-line bg-surface px-4 sm:px-6">
-      <div className="mx-auto grid max-w-[1200px] gap-5 py-7 sm:grid-cols-3">
+    <Section id="trust">
+      <Eyebrow>Safety by design</Eyebrow>
+      <h2 className="mt-3 max-w-2xl text-4xl leading-tight font-extrabold sm:text-5xl">An agent you can leave alone with buyers.</h2>
+      <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {items.map((x) => (
-          <div key={x.t} className="flex items-center gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-lime-100">
-              <x.icon className="size-5" />
-            </span>
-            <div>
-              <p className="font-semibold">{x.t}</p>
-              <p className="text-sm text-ink-650">{x.s}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function HowItWorks() {
-  const steps = [
-    { icon: Camera, t: "Drop in your photos", s: "Start with the things you already own." },
-    { icon: Layers, t: "Pick your selling style", s: "Fewer listings or more individual detail — you decide." },
-    { icon: ClipboardCopy, t: "Copy. Export. Post.", s: "Ready-to-edit drafts for your favorite resale platform." },
-  ];
-  return (
-    <Section id="how-it-works" className="bg-ink-900 text-white">
-      <Eyebrow>HOW IT WORKS</Eyebrow>
-      <h2 className="mt-3 max-w-xl text-4xl leading-tight font-extrabold sm:text-5xl">
-        Three steps. <span className="text-lime-400">One afternoon back.</span>
-      </h2>
-      <p className="mt-3 text-white/60">Your drawer called. It&apos;s time.</p>
-      <div className="mt-12 grid gap-4 md:grid-cols-3">
-        {steps.map((x, i) => (
-          <div key={x.t} className="rounded-[20px] bg-white/[0.06] p-6 ring-1 ring-white/10">
-            <div className="flex items-center justify-between">
-              <span className="flex size-11 items-center justify-center rounded-xl bg-lime-400 text-ink-900">
-                <x.icon className="size-5" />
-              </span>
-              <span className="font-display text-4xl font-extrabold text-white/15">{i + 1}</span>
-            </div>
-            <p className="mt-6 font-display text-xl font-bold">{x.t}</p>
-            <p className="mt-2 text-white/65">{x.s}</p>
+          <div key={x.t} className="rounded-2xl border border-line bg-surface p-6">
+            <x.icon className="size-5 text-brand" />
+            <p className="mt-4 font-semibold">{x.t}</p>
+            <p className="mt-1.5 text-sm text-ink-500">{x.s}</p>
           </div>
         ))}
       </div>
@@ -185,234 +293,22 @@ function HowItWorks() {
   );
 }
 
-function Preview() {
-  const items = [
-    ["monitor", "27-inch computer monitor", "Electronics · Good"],
-    ["keyboard", "Mechanical keyboard", "Electronics · Good"],
-    ["headphones", "Over-ear headphones", "Electronics · Fair"],
-  ];
+function Cta() {
   return (
     <Section>
-      <div className="mx-auto max-w-2xl text-center">
-        <h2 className="text-4xl leading-tight font-extrabold sm:text-5xl">
-          From &ldquo;I should sell these&rdquo; <span className="text-ink-450">to ready-to-post.</span>
-        </h2>
-        <p className="mt-4 text-lg text-ink-650">
-          One workspace for the whole batch. Confirm what you have, pick a plan, and get drafts you can actually use.
-        </p>
-      </div>
-      <div className="mt-12 grid items-center gap-4 rounded-[28px] border border-line bg-surface p-4 sm:p-6 lg:grid-cols-[1fr_auto_1fr]">
-        <div className="rounded-[20px] bg-soft p-4">
-          <div className="flex items-center justify-between">
-            <p className="font-display font-bold">Your items</p>
-            <span className="text-xs text-ink-450">5 items · 3 shown</span>
-          </div>
-          <ul className="mt-3 space-y-2">
-            {items.map(([n, t, s]) => (
-              <li key={n} className="flex items-center gap-3 rounded-2xl bg-surface p-2.5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={img(n)} alt="" className="size-12 rounded-xl object-cover" />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold">{t}</p>
-                  <p className="text-xs text-ink-650">{s}</p>
-                </div>
-                <Badge tone="success">Confirmed</Badge>
-              </li>
-            ))}
-          </ul>
-        </div>
-        <div className="flex justify-center">
-          <span className="rounded-full bg-lime-400 px-4 py-2 text-center font-display text-sm leading-tight font-bold">
-            Fewer
-            <br />
-            listings
-          </span>
-        </div>
-        <div className="rounded-[20px] bg-soft p-4">
-          <div className="flex items-center justify-between">
-            <p className="font-display font-bold">Your plan</p>
-            <Badge tone="lime">3 drafts</Badge>
-          </div>
-          <div className="mt-3 space-y-2">
-            <div className="rounded-2xl bg-surface p-3">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-semibold">Home-office bundle</p>
-                <Badge tone="success">2 items</Badge>
-              </div>
-              <p className="mt-1 text-xs text-ink-650">27-inch monitor + mechanical keyboard</p>
-              <p className="mt-2 flex gap-3 text-xs font-semibold text-ink-650">
-                <span>Split bundle</span>
-                <span>Move item</span>
-                <span>Edit name</span>
-              </p>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl bg-surface p-3">
-              <p className="text-sm font-semibold">Over-ear headphones</p>
-              <Badge tone="success">Draft ready</Badge>
-            </div>
-            <div className="flex items-center justify-between rounded-2xl border border-coral-400 bg-[#fff7f4] p-3">
-              <p className="text-sm font-semibold">Books + lamp</p>
-              <Badge tone="warning">Confirm pairing</Badge>
-            </div>
-          </div>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-function Modes() {
-  const modes = [
-    {
-      icon: TrendingUp,
-      t: "Maximize asking total",
-      s: "Prepare individual drafts so you can choose your own asking prices.",
-      tag: "One draft per item",
-    },
-    {
-      icon: Layers,
-      t: "Fewer listings",
-      s: "Explore sensible bundles and cut down the number of drafts.",
-      tag: "Grouped drafts",
-      featured: true,
-    },
-    {
-      icon: Rocket,
-      t: "Clear space sooner",
-      s: "Prioritize what you'd like gone first, with a backup plan for the rest.",
-      tag: "Priority-first order",
-    },
-  ];
-  return (
-    <Section className="bg-surface">
-      <Eyebrow>THREE WAYS TO SELL</Eyebrow>
-      <h2 className="mt-3 text-4xl leading-tight font-extrabold sm:text-5xl">
-        Choose how much work <span className="text-ink-450">you want to do.</span>
-      </h2>
-      <div className="mt-10 grid gap-4 md:grid-cols-3">
-        {modes.map((m) => (
-          <div
-            key={m.t}
-            className={`flex flex-col rounded-[20px] border p-6 ${m.featured ? "border-ink-900 bg-lime-100" : "border-line bg-canvas"}`}
-          >
-            <span className={`flex size-11 items-center justify-center rounded-xl ${m.featured ? "bg-lime-400" : "bg-surface"}`}>
-              <m.icon className="size-5" />
-            </span>
-            {m.featured && <p className="mt-5 text-[11px] font-bold tracking-widest text-success">GOOD STARTING POINT</p>}
-            <p className={`font-display text-xl font-bold ${m.featured ? "mt-1" : "mt-5"}`}>{m.t}</p>
-            <p className="mt-2 text-ink-650">{m.s}</p>
-            <p className="mt-6 border-t border-line pt-4 text-sm font-semibold">{m.tag}</p>
-          </div>
-        ))}
-      </div>
-    </Section>
-  );
-}
-
-function Comparison() {
-  const things = ["Monitor", "Keyboard", "Headphones", "Desk lamp", "Books"];
-  return (
-    <Section>
-      <h2 className="text-4xl leading-tight font-extrabold sm:text-5xl">
-        Not another one-item <span className="text-ink-450">AI listing writer.</span>
-      </h2>
-      <div className="mt-10 grid gap-4 lg:grid-cols-2">
-        <div className="rounded-[20px] border border-line bg-surface p-5 sm:p-6">
-          <p className="font-display text-lg font-bold">One item at a time</p>
-          <ul className="mt-4 space-y-2">
-            {things.map((t) => (
-              <li key={t} className="flex items-center gap-2 text-sm">
-                <span className="w-24 shrink-0 font-semibold">{t}</span>
-                <span className="flex flex-1 gap-1">
-                  {["Photo", "Write", "Price", "Post"].map((s) => (
-                    <span key={s} className="flex-1 rounded-md bg-soft py-1 text-center text-xs text-ink-650">
-                      {s}
-                    </span>
-                  ))}
-                </span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-4 text-sm text-ink-650">Five separate workflows, five times the decisions.</p>
-        </div>
-        <div className="rounded-[20px] bg-ink-900 p-5 text-white sm:p-6">
-          <p className="font-display text-lg font-bold">
-            One organized batch <span className="text-lime-400">· UNLOAD</span>
-          </p>
-          <ul className="mt-4 space-y-3">
-            {[
-              "Photograph everything at once",
-              "Confirm details in one pass",
-              "Group what belongs together",
-              "Copy drafts when you're ready",
-            ].map((t) => (
-              <li key={t} className="flex items-center gap-3">
-                <span className="flex size-6 items-center justify-center rounded-full bg-lime-400 text-ink-900">
-                  <Check className="size-3.5" strokeWidth={3} />
-                </span>
-                {t}
-              </li>
-            ))}
-          </ul>
-          <p className="mt-6 text-sm text-white/60">One flow for the whole pile. You still make every call.</p>
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-const FAQS = [
-  ["Does UNLOAD post my listings automatically?", "No. You review, copy, and post your drafts yourself."],
-  [
-    "Do I need an account?",
-    "Not to try it. Your photos and drafts live in this browser tab until you close it.",
-  ],
-  [
-    "Does UNLOAD know exactly what my items are worth?",
-    "No. UNLOAD doesn't predict sale prices. You set every asking price yourself.",
-  ],
-  ["Can I edit the drafts?", "Yes. Every title, description, grouping and price is editable before you copy it."],
-];
-
-function Faq() {
-  return (
-    <Section id="faq" className="bg-surface">
-      <div className="grid gap-10 lg:grid-cols-[1fr_1.4fr]">
-        <div>
-          <Eyebrow>FAQ</Eyebrow>
-          <h2 className="mt-3 text-4xl font-extrabold sm:text-5xl">Straight answers.</h2>
-          <p className="mt-3 text-ink-650">UNLOAD helps you prepare listings. You stay in charge of prices and posting.</p>
-        </div>
-        <div className="divide-y divide-line border-y border-line">
-          {FAQS.map(([q, a], i) => (
-            <details key={q} className="group py-5" open={i === 0}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-4 font-display text-lg font-bold">
-                {q}
-                <Plus className="size-5 shrink-0 transition group-open:rotate-45" />
-              </summary>
-              <p className="mt-3 text-ink-650">{a}</p>
-            </details>
-          ))}
-        </div>
-      </div>
-    </Section>
-  );
-}
-
-function BottomCta() {
-  return (
-    <Section>
-      <div className="rounded-[28px] bg-lime-400 px-6 py-14 text-center sm:py-20">
+      <div className="rounded-3xl bg-navy px-6 py-14 text-center text-white sm:py-20">
         <h2 className="text-4xl leading-tight font-extrabold sm:text-6xl">
-          Your pile of stuff
+          Less listing.
           <br />
-          has a plan now.
+          <span className="text-brand-100">More living.</span>
         </h2>
         <div className="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
-          <Button href="/upload" size="lg">
-            Start with photos <ArrowRight className="size-4" />
+          <Button href="/products/new" size="lg">
+            <Camera className="size-4" /> Sell an item
           </Button>
-          <SampleButton variant="secondary">Explore a demo</SampleButton>
+          <Link href="/dashboard" className="inline-flex h-12 items-center justify-center gap-2 rounded-xl border border-white/20 px-6 font-semibold text-white hover:bg-white/10">
+            Run the demo <ArrowRight className="size-4" />
+          </Link>
         </div>
       </div>
     </Section>

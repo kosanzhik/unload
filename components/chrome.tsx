@@ -2,183 +2,268 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
-import { Check, HelpCircle, Menu, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Bell,
+  Bot,
+  Handshake,
+  LayoutDashboard,
+  Menu,
+  MessagesSquare,
+  Plug,
+  PlusCircle,
+  Settings2,
+  X,
+} from "lucide-react";
 import { LogoMark } from "./LogoMark";
-import { Button } from "./ui";
+import { Badge, timeAgo, ToastProvider } from "./ui";
+import {
+  checkAi,
+  markAllRead,
+  markNotificationRead,
+  refreshIntegrations,
+  syncMarketplaceThreads,
+  useApp,
+} from "@/lib/store";
 import { cn } from "@/lib/util";
 
-export function Logo({ compact = false }: { compact?: boolean }) {
+export function Logo({ dark = false }: { dark?: boolean }) {
   return (
     <Link href="/" className="flex shrink-0 items-center gap-2.5" aria-label="UNLOAD home">
-      <LogoMark className="text-ink-900" />
-      <span className={cn("font-display text-lg font-extrabold tracking-tight", compact && "hidden sm:inline")}>
-        UNLOAD
+      <LogoMark />
+      <span className={cn("font-display text-lg font-extrabold tracking-tight", dark && "text-white")}>
+        UNLOAD <span className="font-semibold text-brand">Autopilot</span>
       </span>
     </Link>
   );
 }
 
 const NAV = [
-  ["How it works", "/#how-it-works"],
-  ["Pricing", "/pricing"],
-  ["FAQ", "/#faq"],
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/products/new", label: "Add product", icon: PlusCircle },
+  { href: "/inbox", label: "AI Inbox", icon: MessagesSquare, count: "inbox" },
+  { href: "/deals", label: "Deal Center", icon: Handshake, count: "deals" },
+  { href: "/marketplaces", label: "Marketplaces", icon: Plug },
+  { href: "/settings", label: "Autopilot settings", icon: Settings2 },
 ] as const;
 
-export function SiteHeader() {
-  const [open, setOpen] = useState(false);
-  return (
-    <header className="sticky top-0 z-40 border-b border-line bg-canvas/90 backdrop-blur">
-      <div className="mx-auto flex h-17 max-w-[1200px] items-center justify-between px-4 sm:h-20 sm:px-6">
-        <Logo />
-        <nav className="hidden items-center gap-8 text-sm font-medium text-ink-650 md:flex">
-          {NAV.map(([l, h]) => (
-            <Link key={h} href={h} className="hover:text-ink-900">
-              {l}
-            </Link>
-          ))}
-        </nav>
-        <div className="flex items-center gap-2">
-          <span className="hidden sm:block">
-            <Button href="/upload">Start with photos</Button>
-          </span>
-          <button
-            className="flex size-10 items-center justify-center rounded-xl border border-line md:hidden"
-            onClick={() => setOpen((o) => !o)}
-            aria-label={open ? "Close menu" : "Open menu"}
-          >
-            {open ? <X className="size-5" /> : <Menu className="size-5" />}
-          </button>
-        </div>
-      </div>
-      {open && (
-        <div className="border-t border-line bg-canvas px-4 pb-5 md:hidden">
-          {NAV.map(([l, h]) => (
-            <Link
-              key={h}
-              href={h}
-              onClick={() => setOpen(false)}
-              className="block border-b border-line py-4 font-display text-lg font-bold"
-            >
-              {l}
-            </Link>
-          ))}
-          <Button href="/upload" className="mt-5 w-full">
-            Start with photos
-          </Button>
-        </div>
-      )}
-    </header>
+function useCounts() {
+  const conversations = useApp((s) => s.conversations);
+  const tasks = useApp((s) => s.tasks);
+  const deals = useApp((s) => s.deals);
+  return useMemo(
+    () => ({
+      inbox:
+        conversations.reduce((n, c) => n + c.messages.filter((m) => m.status === "pending_approval").length, 0) +
+        tasks.filter((t) => t.status === "open").length,
+      deals: deals.filter((d) => d.approval === "pending").length,
+    }),
+    [conversations, tasks, deals],
   );
 }
 
-const STEPS = [
-  ["Photos", "/upload"],
-  ["Review", "/review"],
-  ["Plan", "/plan"],
-  ["Drafts", "/drafts"],
-] as const;
-
-export function StepProgress() {
+function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const path = usePathname();
-  const current = STEPS.findIndex(([, h]) => path.startsWith(h));
-  const active = current === -1 ? STEPS.length : current;
+  const counts = useCounts();
   return (
-    <ol className="flex items-center gap-1.5 sm:gap-2" aria-label="Progress">
-      {STEPS.map(([label, href], i) => {
-        const done = i < active;
-        const now = i === active;
+    <nav className="space-y-1">
+      {NAV.map((n) => {
+        const active = n.href === "/products/new" ? path === n.href : path.startsWith(n.href);
+        const count = "count" in n ? counts[n.count] : 0;
         return (
-          <li key={href} className="flex items-center gap-1.5 sm:gap-2">
-            {i > 0 && <span className={cn("h-px w-3 sm:w-6", done || now ? "bg-ink-900" : "bg-line")} />}
-            <Link
-              href={done ? href : "#"}
-              aria-current={now ? "step" : undefined}
-              className={cn(
-                "flex items-center gap-1.5 rounded-full py-1 pr-2.5 pl-1 text-xs font-semibold sm:text-sm",
-                now && "bg-ink-900 text-white",
-                done && "bg-lime-100 text-ink-900",
-                !done && !now && "pointer-events-none text-ink-450",
-              )}
-            >
-              <span
-                className={cn(
-                  "flex size-5 items-center justify-center rounded-full text-[11px] sm:size-6",
-                  now && "bg-lime-400 text-ink-900",
-                  done && "bg-lime-400 text-ink-900",
-                  !done && !now && "border border-line",
-                )}
-              >
-                {done ? <Check className="size-3" strokeWidth={3} /> : i + 1}
-              </span>
-              <span className={cn(!now && "hidden md:inline")}>{label}</span>
-            </Link>
-          </li>
+          <Link
+            key={n.href}
+            href={n.href}
+            onClick={onNavigate}
+            aria-current={active ? "page" : undefined}
+            className={cn(
+              "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition",
+              active ? "bg-white/10 text-white" : "text-white/60 hover:bg-white/5 hover:text-white",
+            )}
+          >
+            <n.icon className="size-[18px]" />
+            {n.label}
+            {count > 0 && <span className="ml-auto rounded-full bg-brand px-2 py-0.5 text-[11px] text-white">{count}</span>}
+          </Link>
         );
       })}
-    </ol>
+    </nav>
   );
 }
 
-export function AppHeader() {
+function AiStatus() {
+  const ai = useApp((s) => s.ai);
+  if (!ai.checked) return null;
   return (
-    <header className="sticky top-0 z-40 border-b border-line bg-canvas/90 backdrop-blur">
-      <div className="mx-auto flex h-15 max-w-[1200px] items-center justify-between gap-3 px-4 sm:h-20 sm:px-6">
-        <Logo compact />
-        <StepProgress />
-        <Link
-          href="/#how-it-works"
-          className="hidden items-center gap-1.5 text-sm font-medium text-ink-650 hover:text-ink-900 lg:flex"
-        >
-          <HelpCircle className="size-4" /> How this works
-        </Link>
-      </div>
-    </header>
-  );
-}
-
-/** Sticky bottom bar used by the flow screens. */
-export function ActionBar({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="sticky bottom-0 z-30 mt-auto border-t border-line bg-surface/95 backdrop-blur">
-      <div className="mx-auto flex max-w-[1200px] flex-wrap items-center justify-between gap-3 px-4 py-3.5 sm:px-6 sm:py-5">
-        {children}
-      </div>
+    <div className="rounded-xl bg-white/5 p-3 text-xs text-white/70">
+      <p className="flex items-center gap-2 font-semibold text-white">
+        <Bot className="size-4" /> AI engine
+      </p>
+      <p className="mt-1">
+        {ai.claude
+          ? `Claude (${ai.model}) handles vision and wording. Policy rules always decide what may be said.`
+          : "Demo mode: rule-based agent, no AI vision. Add ANTHROPIC_API_KEY to enable Claude."}
+      </p>
     </div>
   );
 }
 
-export function Footer() {
+function Bellbox() {
+  const notifications = useApp((s) => s.notifications);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const unread = notifications.filter((n) => !n.read).length;
+  useEffect(() => {
+    const h = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && setOpen(false);
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
   return (
-    <footer className="border-t border-line bg-surface">
-      <div className="mx-auto grid max-w-[1200px] gap-10 px-4 py-12 sm:px-6 md:grid-cols-[2fr_1fr_1fr]">
-        <div className="max-w-xs">
-          <Logo />
-          <p className="mt-4 text-sm text-ink-650">
-            Turn a pile of unused things into organized listing drafts. Less listing. More living.
-          </p>
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
+        className="relative flex size-10 items-center justify-center rounded-xl border border-line bg-surface hover:border-ink-400"
+      >
+        <Bell className="size-[18px]" />
+        {unread > 0 && (
+          <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-brand px-1 text-[11px] font-bold text-white">
+            {unread}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="animate-rise absolute right-0 z-50 mt-2 w-[min(360px,calc(100vw-32px))] overflow-hidden rounded-2xl border border-line bg-surface shadow-[var(--shadow-pop)]">
+          <div className="flex items-center justify-between border-b border-line px-4 py-3">
+            <p className="font-display font-bold">Notifications</p>
+            {unread > 0 && (
+              <button onClick={markAllRead} className="text-xs font-semibold text-brand">
+                Mark all read
+              </button>
+            )}
+          </div>
+          <ul className="max-h-96 overflow-y-auto">
+            {notifications.length === 0 && <li className="px-4 py-8 text-center text-sm text-ink-500">You&apos;re all caught up.</li>}
+            {notifications.slice(0, 30).map((n) => (
+              <li key={n.id}>
+                <Link
+                  href={n.href}
+                  onClick={() => {
+                    markNotificationRead(n.id);
+                    setOpen(false);
+                  }}
+                  className={cn("block border-b border-line px-4 py-3 hover:bg-soft", !n.read && "bg-brand-50/50")}
+                >
+                  <p className="flex items-center gap-2 text-sm font-semibold">
+                    {!n.read && <span className="size-2 shrink-0 rounded-full bg-brand" />}
+                    {n.title}
+                  </p>
+                  <p className="mt-0.5 line-clamp-2 text-xs text-ink-500">{n.body}</p>
+                  <p className="mt-1 text-[11px] text-ink-400">{timeAgo(n.createdAt)}</p>
+                </Link>
+              </li>
+            ))}
+          </ul>
         </div>
-        <div>
-          <p className="mb-3 text-xs font-bold tracking-widest text-ink-450">PRODUCT</p>
-          {NAV.map(([l, h]) => (
-            <Link key={h} href={h} className="block py-1 text-sm text-ink-650 hover:text-ink-900">
-              {l}
-            </Link>
-          ))}
-        </div>
-        <div>
-          <p className="mb-3 text-xs font-bold tracking-widest text-ink-450">LEGAL</p>
-          <span className="block py-1 text-sm text-ink-650">Privacy</span>
-          <span className="block py-1 text-sm text-ink-650">Terms</span>
+      )}
+    </div>
+  );
+}
+
+/** Boot: AI status, integration status, and periodic sync with connected marketplaces. */
+function useBoot() {
+  const olx = useApp((s) => s.integrations.olx?.state);
+  useEffect(() => {
+    checkAi();
+    refreshIntegrations();
+  }, []);
+  useEffect(() => {
+    if (olx !== "connected") return;
+    const run = () => syncMarketplaceThreads("olx").catch(() => {});
+    run();
+    const t = setInterval(run, 60_000);
+    return () => clearInterval(t);
+  }, [olx]);
+}
+
+export function AppShell({ children }: { children: React.ReactNode }) {
+  useBoot();
+  const [menu, setMenu] = useState(false);
+  const path = usePathname();
+  const title = NAV.find((n) => (n.href === "/products/new" ? path === n.href : path.startsWith(n.href)))?.label ?? (path.startsWith("/products") ? "Product" : "");
+
+  return (
+    <ToastProvider>
+      <div className="flex min-h-dvh">
+        <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col gap-6 bg-navy p-4 lg:flex">
+          <div className="px-2 pt-2">
+            <Logo dark />
+          </div>
+          <NavLinks />
+          <div className="mt-auto">
+            <AiStatus />
+          </div>
+        </aside>
+
+        {menu && (
+          <div className="fixed inset-0 z-50 bg-ink-900/50 lg:hidden" onClick={() => setMenu(false)}>
+            <aside className="animate-rise flex h-full w-72 flex-col gap-6 bg-navy p-4" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-2 pt-2">
+                <Logo dark />
+                <button onClick={() => setMenu(false)} aria-label="Close menu" className="text-white/70">
+                  <X className="size-5" />
+                </button>
+              </div>
+              <NavLinks onNavigate={() => setMenu(false)} />
+              <div className="mt-auto">
+                <AiStatus />
+              </div>
+            </aside>
+          </div>
+        )}
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-line bg-canvas/85 px-4 backdrop-blur sm:px-6">
+            <button
+              onClick={() => setMenu(true)}
+              aria-label="Open menu"
+              className="flex size-10 items-center justify-center rounded-xl border border-line bg-surface lg:hidden"
+            >
+              <Menu className="size-5" />
+            </button>
+            <p className="truncate font-display text-lg font-bold">{title}</p>
+            <div className="ml-auto flex items-center gap-2">
+              <ModePill />
+              <Bellbox />
+            </div>
+          </header>
+          <main className="mx-auto w-full max-w-[1240px] min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-8">{children}</main>
         </div>
       </div>
-      <div className="mx-auto flex max-w-[1200px] flex-col gap-2 border-t border-line px-4 py-6 text-xs text-ink-450 sm:px-6 md:flex-row md:justify-between">
-        <p>
-          UNLOAD is not affiliated with eBay, Facebook Marketplace, Craigslist, or any resale platform. You
-          post your listings yourself.
-        </p>
-        <p>© 2026 UNLOAD</p>
+    </ToastProvider>
+  );
+}
+
+function ModePill() {
+  const mode = useApp((s) => s.settings.mode);
+  const label = { manual: "Manual", assisted: "Assisted", autopilot: "Autopilot" }[mode];
+  return (
+    <Link href="/settings" className="hidden sm:block" title="Automation mode">
+      <Badge tone={mode === "autopilot" ? "brand" : "neutral"} dot>
+        {label} mode
+      </Badge>
+    </Link>
+  );
+}
+
+export function PageHeader({ title, sub, action }: { title: string; sub?: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="min-w-0">
+        <h1 className="text-2xl font-extrabold sm:text-3xl">{title}</h1>
+        {sub && <p className="mt-1 text-ink-500">{sub}</p>}
       </div>
-    </footer>
+      {action && <div className="flex shrink-0 flex-wrap gap-2">{action}</div>}
+    </div>
   );
 }
