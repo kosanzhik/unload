@@ -1,6 +1,6 @@
 /**
  * UNLOAD Autopilot domain model.
- * Everything the UI, the agent and the marketplace adapters share lives here.
+ * Shared by the UI, the sales agent, the strategy engine and marketplace adapters.
  */
 
 export type Currency = "USD" | "KZT";
@@ -24,81 +24,22 @@ export type Category = (typeof CATEGORIES)[number];
 
 export type Photo = { id: string; src: string; name: string };
 
-/* ---------- Product knowledge base (Living Listing) ---------- */
+/** The seller's selling goal — drives the AutoSale strategy engine. */
+export type Goal = "fast" | "balanced" | "max";
 
-export type FactSource =
-  | "seller" // seller typed or confirmed it
-  | "evidence" // seller confirmed it and attached a photo/video
-  | "photo"; // visible in a listing photo, confirmed by the seller during review
+/* ---------- What the AI knows (seller-verified facts) ---------- */
 
 export type Fact = {
   id: string;
-  /** short topic key used for matching buyer questions, e.g. "hdmi", "stand", "dead pixels" */
+  /** short topic key used for matching buyer questions, e.g. "hdmi", "charger" */
   topic: string;
-  /** the question this fact answers, in plain words */
   question: string;
   answer: string;
-  source: FactSource;
-  evidenceIds: string[];
+  source: "seller";
   createdAt: number;
-  /** true when the seller allowed adding it to the public listing text */
+  /** seller allowed it in the public listing text */
   inListing: boolean;
 };
-
-export type Evidence = {
-  id: string;
-  kind: "photo" | "video" | "note";
-  fileName?: string;
-  mime?: string;
-  size?: number;
-  /** IndexedDB key for the binary; absent for notes */
-  blobKey?: string;
-  note?: string;
-  createdAt: number;
-};
-
-/* ---------- Pricing & automation ---------- */
-
-export type PricingRules = {
-  currency: Currency;
-  /** public asking price */
-  desired: number | null;
-  /** private floor — never shown to buyers */
-  minimum: number | null;
-  /** the agent may make counteroffers between desired and minimum */
-  negotiationEnabled: boolean;
-  /** extra cap on discounts, % off desired (0–100) */
-  maxDiscountPct: number;
-};
-
-export type AutomationMode = "manual" | "assisted" | "autopilot";
-
-export type ReplyCategory = "availability" | "condition" | "logistics" | "pricing";
-
-export type AutopilotSettings = {
-  mode: AutomationMode;
-  /** which routine replies may be sent without approval (assisted / autopilot) */
-  allowedReplies: Record<ReplyCategory, boolean>;
-  /** logistics the seller actually offers — the agent never promises others */
-  pickup: boolean;
-  shipping: boolean;
-  meetingArea: string;
-  escalation: {
-    paymentQuestions: boolean;
-    offPlatformContact: boolean;
-    repeatedLowOffers: boolean;
-  };
-  notifications: {
-    browser: boolean;
-    dealRequests: boolean;
-    verificationTasks: boolean;
-    approvals: boolean;
-  };
-};
-
-/* ---------- Product ---------- */
-
-export type ProductStatus = "draft" | "ready" | "listed" | "sold" | "archived";
 
 export type SellerQuestion = {
   id: string;
@@ -108,10 +49,25 @@ export type SellerQuestion = {
   answer?: string;
 };
 
+/* ---------- Pricing ---------- */
+
+export type PricingRules = {
+  currency: Currency;
+  /** public asking price */
+  desired: number | null;
+  /** private floor — never shown to buyers */
+  minimum: number | null;
+};
+
+/* ---------- Product ---------- */
+
+export type ProductStatus = "draft" | "selling" | "sold" | "archived";
+
 export type Product = {
   id: string;
   createdAt: number;
   status: ProductStatus;
+  /** created from a sample photo (demo) */
   demo: boolean;
   photos: Photo[];
   title: string;
@@ -121,17 +77,18 @@ export type Product = {
   brand: string;
   model: string;
   attributes: { name: string; value: string }[];
-  /** what the AI could not determine from photos */
   missing: string[];
   sellerQuestions: SellerQuestion[];
   facts: Fact[];
-  evidence: Evidence[];
+  goal: Goal;
   pricing: PricingRules;
-  /** listing-text changes proposed from new verified facts, awaiting approval */
-  pendingListingUpdates: { id: string; factId: string; text: string }[];
+  /** Autopilot on: routine replies and in-range negotiation go out automatically */
+  autopilot: boolean;
+  /** pickup/shipping the seller offers — the agent never promises others */
+  logistics: { pickup: boolean; shipping: boolean; area: string };
   analysis: { source: "claude" | "demo" | "manual"; at: number } | null;
-  /** seller enabled the AI sales agent for this product */
-  agentEnabled: boolean;
+  /** strategy suggestions the seller dismissed (by id) */
+  dismissedTips: string[];
 };
 
 /* ---------- Marketplaces ---------- */
@@ -155,19 +112,14 @@ export type Listing = {
   currency: Currency;
   publishedAt?: number;
   note?: string;
+  /** only when the marketplace actually reports it */
   views?: number;
 };
 
 /* ---------- Conversations ---------- */
 
 export type MessageRole = "buyer" | "agent" | "seller" | "system";
-
-export type MessageStatus =
-  | "received"
-  | "pending_approval" // agent draft waiting for the seller
-  | "sent"
-  | "failed"
-  | "discarded";
+export type MessageStatus = "received" | "pending_approval" | "sent" | "failed" | "discarded";
 
 export type Message = {
   id: string;
@@ -175,9 +127,7 @@ export type Message = {
   text: string;
   status: MessageStatus;
   createdAt: number;
-  /** why the agent wrote this, shown to the seller */
   rationale?: string;
-  category?: ReplyCategory | "escalation" | "deal";
   externalId?: string;
 };
 
@@ -187,57 +137,83 @@ export type Conversation = {
   marketplace: MarketplaceId;
   externalThreadId?: string;
   buyerRef: string;
-  /** demo conversations are scripted and clearly labeled in the UI */
+  /** scripted demo buyer on the demo marketplace — labeled everywhere */
   demo: boolean;
   messages: Message[];
+  /** last price the agent offered in this conversation */
+  lastCounter: number | null;
   lowOfferCount: number;
   updatedAt: number;
   unread: boolean;
 };
 
-/* ---------- Verification & deals ---------- */
+/* ---------- Questions for the seller ---------- */
 
-export type VerificationTask = {
+export type OpenQuestion = {
   id: string;
   productId: string;
   conversationId?: string;
-  /** the buyer's original words, answered again once verified */
-  buyerQuestion?: string;
+  buyerQuestion: string;
   topic: string;
   question: string;
-  instruction: string;
-  status: "open" | "done" | "dismissed";
+  status: "open" | "answered" | "dismissed";
   createdAt: number;
-  factId?: string;
 };
 
-export type DealKind = "offer" | "inspection" | "purchase";
+/* ---------- Offers & deals ---------- */
 
-export type DealRequest = {
+export type OfferKind = "offer" | "purchase" | "meeting";
+
+export type Offer = {
   id: string;
   productId: string;
   conversationId: string;
   marketplace: MarketplaceId;
   buyerRef: string;
-  kind: DealKind;
-  offeredPrice: number | null;
+  kind: OfferKind;
+  price: number | null;
   currency: Currency;
-  conditions: string;
+  /** buyer's proposed timing / pickup, in their words */
+  when: string;
   summary: string;
-  verification: "verified" | "partially_verified" | "unverified";
-  approval: "pending" | "approved" | "declined" | "completed";
+  status: "pending" | "accepted" | "rejected" | "countered" | "sold";
   createdAt: number;
   decidedAt?: number;
 };
 
-/* ---------- Notifications ---------- */
+/* ---------- Activity & notifications ---------- */
+
+export type ActivityKind =
+  | "listing_prepared"
+  | "publication_submitted"
+  | "published"
+  | "publish_failed"
+  | "question_answered"
+  | "reply_drafted"
+  | "counteroffer_sent"
+  | "offer_received"
+  | "approval_requested"
+  | "question_for_seller"
+  | "deal_accepted"
+  | "deal_rejected"
+  | "sold";
+
+export type Activity = {
+  id: string;
+  kind: ActivityKind;
+  productId: string;
+  text: string;
+  at: number;
+  /** happened on the demo marketplace / with a simulated buyer */
+  demo: boolean;
+};
 
 export type Notification = {
   id: string;
-  kind: "deal" | "verification" | "approval" | "listing" | "info";
   title: string;
   body: string;
   href: string;
   createdAt: number;
   read: boolean;
+  offerId?: string;
 };

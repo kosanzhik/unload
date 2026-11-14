@@ -15,7 +15,7 @@ import {
 /* ------------------------------------------------------------------ */
 
 const MOCK_KEY = "unload:mock-market";
-type MockState = { connected: boolean; adverts: Record<string, { status: ListingStatus; views: number; createdAt: number }> };
+type MockState = { connected: boolean; adverts: Record<string, { status: ListingStatus; createdAt: number }> };
 
 function mockState(): MockState {
   try {
@@ -35,14 +35,14 @@ const NONE: Capabilities = { publish: false, update: false, readStatus: false, a
 
 export const mockAdapter: MarketplaceAdapter = {
   id: "mock",
-  name: "Demo Market",
+  name: "Demo Marketplace",
   market: "Simulated marketplace for testing",
   defaultCurrency: "USD",
   titleMax: 80,
   capabilities: ALL,
   async status() {
     return mockState().connected
-      ? { state: "connected", detail: "Simulated marketplace. Listings and buyers here are not real.", account: "demo-seller" }
+      ? { state: "connected", detail: "Built-in demo marketplace. Listings and buyers here are simulated and labeled as demo.", account: "demo-seller" }
       : { state: "requires_authorization", detail: "Connect the simulated account to publish demo listings." };
   },
   async connect() {
@@ -55,18 +55,14 @@ export const mockAdapter: MarketplaceAdapter = {
     const s = mockState();
     if (!s.connected) throw new Error("Demo Market isn't connected.");
     const id = uid("mk");
-    s.adverts[id] = { status: "active", views: 0, createdAt: Date.now() };
+    s.adverts[id] = { status: "active", createdAt: Date.now() };
     saveMock(s);
     return { externalId: id, status: "active", url: undefined, note: "Published to the simulated marketplace." };
   },
   async readStatus(l) {
-    const s = mockState();
-    const a = l.externalId ? s.adverts[l.externalId] : undefined;
-    if (!a) return {};
-    // Simulated traffic: views grow slowly with listing age.
-    a.views = Math.floor((Date.now() - a.createdAt) / 90_000);
-    saveMock(s);
-    return { status: a.status, views: a.views };
+    // The demo marketplace has no real traffic, so it reports no views.
+    const a = l.externalId ? mockState().adverts[l.externalId] : undefined;
+    return a ? { status: a.status } : {};
   },
   async update() {},
   async setAvailability(l, active) {
@@ -155,7 +151,7 @@ export const olxAdapter: MarketplaceAdapter = {
         title: listing.title,
         description: listing.description,
         price: listing.price,
-        negotiable: product.pricing.negotiationEnabled,
+        negotiable: product.pricing.minimum != null && product.pricing.minimum < (product.pricing.desired ?? 0),
         categoryQuery: product.title,
         city: olxContext.city,
         contactName: olxContext.contactName,
@@ -384,7 +380,7 @@ export const reverbAdapter: MarketplaceAdapter = {
         model: product.model,
         condition: product.condition,
         price: listing.price,
-        offersEnabled: product.pricing.negotiationEnabled,
+        offersEnabled: product.pricing.minimum != null && product.pricing.minimum < (product.pricing.desired ?? 0),
         photos,
         categoryQuery: `${product.category} ${product.title}`,
       },
@@ -464,7 +460,7 @@ export const ADAPTERS: Record<MarketplaceId, MarketplaceAdapter> = {
   facebook: facebookAdapter,
   mercari: mercariAdapter,
 };
-export const MARKETPLACE_ORDER: MarketplaceId[] = ["olx", "ebay", "reverb", "facebook", "mercari", "mock"];
+export const MARKETPLACE_ORDER: MarketplaceId[] = ["ebay", "reverb", "facebook", "mercari", "olx", "mock"];
 
 export function draftListing(product: Product, m: MarketplaceId): Listing {
   return {

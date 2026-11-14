@@ -1,9 +1,8 @@
 "use client";
 
-import { Lock, Plus, Trash2 } from "lucide-react";
-import { Help, Label, Note, Segmented, Toggle } from "./ui";
-import { CATEGORIES, CONDITIONS, type Category, type Condition, type PricingRules, type Product } from "@/lib/core/types";
-import { evaluateOffer, floor, money } from "@/lib/negotiation/policy";
+import { Plus, Trash2 } from "lucide-react";
+import { Help, Label } from "./ui";
+import { CATEGORIES, CONDITIONS, type Category, type Condition, type Product } from "@/lib/core/types";
 
 type Details = Pick<Product, "title" | "description" | "category" | "condition" | "brand" | "model" | "attributes">;
 
@@ -87,74 +86,3 @@ export function DetailsForm({ value, onChange }: { value: Details; onChange: (d:
   );
 }
 
-const num = (v: string) => (v.trim() === "" ? null : Math.max(0, Number(v.replace(/[^0-9.]/g, "")) || 0));
-
-export function pricingError(p: PricingRules) {
-  if (p.minimum != null && p.desired != null && p.minimum > p.desired) return "Your minimum can't be higher than the asking price.";
-  if (p.negotiationEnabled && p.minimum == null) return "Set a private minimum to let the agent negotiate.";
-  return null;
-}
-
-export function PricingForm({ value, onChange }: { value: PricingRules; onChange: (p: Partial<PricingRules>) => void }) {
-  const err = pricingError(value);
-  const sample = value.desired != null ? Math.round(value.desired * 0.8) : null;
-  const example = sample != null && !err ? evaluateOffer(sample, value) : null;
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="text-sm font-semibold">Currency</span>
-        <Segmented
-          value={value.currency}
-          onChange={(currency) => onChange({ currency })}
-          options={[
-            { value: "USD", label: "USD $" },
-            { value: "KZT", label: "KZT ₸" },
-          ]}
-        />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div>
-          <Label htmlFor="p-desired">Asking price</Label>
-          <input id="p-desired" inputMode="decimal" className="field" placeholder="Public price" value={value.desired ?? ""} onChange={(e) => onChange({ desired: num(e.target.value) })} />
-          <Help>Shown to buyers.</Help>
-        </div>
-        <div>
-          <Label htmlFor="p-min" hint={<span className="inline-flex items-center gap-1"><Lock className="size-3" /> private</span>}>
-            Minimum you&apos;d accept
-          </Label>
-          <input id="p-min" inputMode="decimal" className="field" placeholder="Never shown to buyers" value={value.minimum ?? ""} onChange={(e) => onChange({ minimum: num(e.target.value) })} />
-          <Help>The agent never reveals this number.</Help>
-        </div>
-      </div>
-      <div className="rounded-xl border border-line px-4">
-        <Toggle
-          checked={value.negotiationEnabled}
-          onChange={(negotiationEnabled) => onChange({ negotiationEnabled })}
-          label="Let the agent make counteroffers"
-          description="Only between your asking price and your private minimum. Final acceptance is always yours."
-        />
-        {value.negotiationEnabled && (
-          <div className="border-t border-line py-3">
-            <Label htmlFor="p-disc" hint={`${value.maxDiscountPct}% off asking`}>
-              Maximum discount
-            </Label>
-            <input id="p-disc" type="range" min={0} max={50} step={1} className="w-full accent-brand" value={value.maxDiscountPct} onChange={(e) => onChange({ maxDiscountPct: Number(e.target.value) })} />
-            <Help>Extra cap on top of your minimum. Lowest possible counteroffer: {money(floor(value), value.currency)}.</Help>
-          </div>
-        )}
-      </div>
-      {err && <p className="text-sm font-medium text-error">{err}</p>}
-      {example && sample != null && (
-        <Note tone="brand">
-          Example: a buyer offers {money(sample, value.currency)} →{" "}
-          {example.action === "counter"
-            ? `the agent replies “The seller is asking ${money(value.desired, value.currency)}. I can offer ${money(example.counter, value.currency)}.”`
-            : example.action === "forward"
-              ? "the agent passes it to you to accept."
-              : `the agent restates the asking price (${money(value.desired, value.currency)}).`}
-        </Note>
-      )}
-      <Note>UNLOAD doesn&apos;t estimate prices: no trustworthy sales data is connected, so every amount here is yours.</Note>
-    </div>
-  );
-}

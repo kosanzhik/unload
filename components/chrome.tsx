@@ -3,20 +3,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bell,
-  Bot,
-  Handshake,
-  LayoutDashboard,
-  Menu,
-  MessagesSquare,
-  Plug,
-  PlusCircle,
-  Settings2,
-  X,
-} from "lucide-react";
+import { Bell, Bot, Camera, LayoutDashboard, Menu, MessagesSquare, Plug, X } from "lucide-react";
 import { LogoMark } from "./LogoMark";
-import { Badge, timeAgo, ToastProvider } from "./ui";
+import { timeAgo, ToastProvider } from "./ui";
 import {
   checkAi,
   markAllRead,
@@ -40,25 +29,23 @@ export function Logo({ dark = false }: { dark?: boolean }) {
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/products/new", label: "Add product", icon: PlusCircle },
+  { href: "/sell", label: "Sell an item", icon: Camera },
   { href: "/inbox", label: "AI Inbox", icon: MessagesSquare, count: "inbox" },
-  { href: "/deals", label: "Deal Center", icon: Handshake, count: "deals" },
   { href: "/marketplaces", label: "Marketplaces", icon: Plug },
-  { href: "/settings", label: "Autopilot settings", icon: Settings2 },
 ] as const;
 
 function useCounts() {
   const conversations = useApp((s) => s.conversations);
-  const tasks = useApp((s) => s.tasks);
-  const deals = useApp((s) => s.deals);
+  const questions = useApp((s) => s.questions);
+  const offers = useApp((s) => s.offers);
   return useMemo(
     () => ({
       inbox:
         conversations.reduce((n, c) => n + c.messages.filter((m) => m.status === "pending_approval").length, 0) +
-        tasks.filter((t) => t.status === "open").length,
-      deals: deals.filter((d) => d.approval === "pending").length,
+        questions.filter((q) => q.status === "open").length +
+        offers.filter((o) => o.status === "pending").length,
     }),
-    [conversations, tasks, deals],
+    [conversations, questions, offers],
   );
 }
 
@@ -68,7 +55,7 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <nav className="space-y-1">
       {NAV.map((n) => {
-        const active = n.href === "/products/new" ? path === n.href : path.startsWith(n.href);
+        const active = path.startsWith(n.href);
         const count = "count" in n ? counts[n.count] : 0;
         return (
           <Link
@@ -102,7 +89,7 @@ function AiStatus() {
       <p className="mt-1">
         {ai.claude
           ? `Claude (${ai.model}) handles vision and wording. Policy rules always decide what may be said.`
-          : "Demo mode: rule-based agent, no AI vision. Claude turns on automatically once AI Gateway credits or an Anthropic key are available."}
+          : "Demo mode: rule-based agent, sample photos only. Claude turns on automatically once AI Gateway credits or an Anthropic key are available."}
       </p>
     </div>
   );
@@ -191,7 +178,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useBoot();
   const [menu, setMenu] = useState(false);
   const path = usePathname();
-  const title = NAV.find((n) => (n.href === "/products/new" ? path === n.href : path.startsWith(n.href)))?.label ?? (path.startsWith("/products") ? "Product" : "");
+  const title = NAV.find((n) => path.startsWith(n.href))?.label ?? (path.startsWith("/items") ? "Item" : "");
 
   return (
     <ToastProvider>
@@ -234,7 +221,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </button>
             <p className="truncate font-display text-lg font-bold">{title}</p>
             <div className="ml-auto flex items-center gap-2">
-              <ModePill />
               <Bellbox />
             </div>
           </header>
@@ -242,18 +228,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
     </ToastProvider>
-  );
-}
-
-function ModePill() {
-  const mode = useApp((s) => s.settings.mode);
-  const label = { manual: "Manual", assisted: "Assisted", autopilot: "Autopilot" }[mode];
-  return (
-    <Link href="/settings" className="hidden sm:block" title="Automation mode">
-      <Badge tone={mode === "autopilot" ? "brand" : "neutral"} dot>
-        {label} mode
-      </Badge>
-    </Link>
   );
 }
 

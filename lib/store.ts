@@ -1,27 +1,28 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { decide, needsApproval, type AgentDecision } from "./agent/salesAgent";
+import { decide, needsApproval, shortName, type AgentDecision } from "./agent/salesAgent";
 import type {
-  AutopilotSettings,
+  Activity,
+  ActivityKind,
   Conversation,
-  DealRequest,
-  Evidence,
   Fact,
+  Goal,
   IntegrationState,
   Listing,
   MarketplaceId,
   Message,
   Notification,
+  Offer,
+  OpenQuestion,
   Product,
-  VerificationTask,
 } from "./core/types";
-import { putFile } from "./evidence";
 import { knowledgeSheet } from "./knowledge/kb";
 import { listingDescription, listingTitle } from "./listing/drafts";
 import { ADAPTERS, connectReverbToken, draftListing, ebayContext, mockAdapter, olxContext } from "./marketplaces/registry";
 import type { IntegrationStatus } from "./marketplaces/types";
 import { guardReply, money, parseOffer } from "./negotiation/policy";
+import { suggestedMinimum } from "./strategy/engine";
 import { uid } from "./util";
 import { SAMPLES } from "./vision/demo";
 
@@ -29,56 +30,37 @@ import { SAMPLES } from "./vision/demo";
 /* State                                                              */
 /* ================================================================== */
 
-export type Settings = AutopilotSettings & {
-  city: string;
-  contactName: string;
-  phone: string;
-  usCity: string;
-  usState: string;
-  usZip: string;
-};
+export type Prefs = { olxCity: string; contactName: string; phone: string; usCity: string; usState: string; usZip: string; browserAlerts: boolean };
 
 export type AppState = {
   products: Product[];
   listings: Listing[];
   conversations: Conversation[];
-  tasks: VerificationTask[];
-  deals: DealRequest[];
+  questions: OpenQuestion[];
+  offers: Offer[];
+  activity: Activity[];
   notifications: Notification[];
-  settings: Settings;
+  prefs: Prefs;
   integrations: Partial<Record<MarketplaceId, IntegrationStatus>>;
   ai: { claude: boolean; model: string | null; checked: boolean };
 };
 
-export const DEFAULT_SETTINGS: Settings = {
-  mode: "assisted",
-  allowedReplies: { availability: true, condition: true, logistics: true, pricing: false },
-  pickup: true,
-  shipping: false,
-  meetingArea: "",
-  escalation: { paymentQuestions: true, offPlatformContact: true, repeatedLowOffers: true },
-  notifications: { browser: false, dealRequests: true, verificationTasks: true, approvals: true },
-  city: "Алматы",
-  contactName: "",
-  phone: "",
-  usCity: "",
-  usState: "",
-  usZip: "",
-};
+const DEFAULT_PREFS: Prefs = { olxCity: "Алматы", contactName: "", phone: "", usCity: "", usState: "", usZip: "", browserAlerts: false };
 
 const EMPTY: AppState = {
   products: [],
   listings: [],
   conversations: [],
-  tasks: [],
-  deals: [],
+  questions: [],
+  offers: [],
+  activity: [],
   notifications: [],
-  settings: DEFAULT_SETTINGS,
+  prefs: DEFAULT_PREFS,
   integrations: {},
   ai: { claude: false, model: null, checked: false },
 };
 
-const KEY = "unload:autopilot:v1";
+const KEY = "unload:autopilot:v2";
 let state: AppState = EMPTY;
 const listeners = new Set<() => void>();
 let loaded = false;
@@ -90,16 +72,16 @@ function load() {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const s = JSON.parse(raw) as Partial<AppState>;
-      state = { ...EMPTY, ...s, settings: { ...DEFAULT_SETTINGS, ...s.settings }, integrations: {}, ai: EMPTY.ai };
+      state = { ...EMPTY, ...s, prefs: { ...DEFAULT_PREFS, ...s.prefs }, integrations: {}, ai: EMPTY.ai };
     }
   } catch {}
   applyContexts();
 }
 
 function applyContexts() {
-  const st = state.settings;
-  Object.assign(olxContext, { city: st.city, contactName: st.contactName, phone: st.phone });
-  Object.assign(ebayContext, { city: st.usCity, stateOrProvince: st.usState, postalCode: st.usZip, country: "US" });
+  const p = state.prefs;
+  Object.assign(olxContext, { city: p.olxCity, contactName: p.contactName, phone: p.phone });
+  Object.assign(ebayContext, { city: p.usCity, stateOrProvince: p.usState, postalCode: p.usZip, country: "US" });
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -131,6 +113,7 @@ function subscribe(l: () => void) {
   return () => listeners.delete(l);
 }
 
+/** Select a slice of state. Return existing references only (derive with useMemo). */
 export function useApp<T>(select: (s: AppState) => T): T {
   return useSyncExternalStore(subscribe, () => select(getState()), () => select(EMPTY));
 }
@@ -165,22 +148,28 @@ function patchMessage(cid: string, mid: string, data: Partial<Message>) {
   patchConvo(cid, (c) => ({ messages: c.messages.map((m) => (m.id === mid ? { ...m, ...data } : m)) }));
 }
 
-export function notify(n: Omit<Notification, "id" | "createdAt" | "read">) {
+/** Truthful activity feed: only things that actually happened in this app. */
+function log(kind: ActivityKind, productId: string, text: string, demo: boolean) {
+  set((s) => ({ activity: [{ id: uid("a"), kind, productId, text, at: now(), demo }, ...s.activity].slice(0, 300) }));
+}
+
+function notify(n: Omit<Notification, "id" | "createdAt" | "read">) {
   set((s) => ({ notifications: [{ ...n, id: uid("n"), createdAt: now(), read: false }, ...s.notifications].slice(0, 100) }));
-  const st = getState().settings.notifications;
-  if (st.browser && typeof Notification !== "undefined" && Notification.permission === "granted") {
+  if (getState().prefs.browserAlerts && typeof Notification !== "undefined" && Notification.permission === "granted") {
     try {
       new Notification(n.title, { body: n.body });
     } catch {}
   }
 }
 
+const isDemo = (x: { marketplace: MarketplaceId; demo?: boolean }) => x.marketplace === "mock" || Boolean(x.demo);
+
 /* ================================================================== */
-/* Settings, AI & integrations                                        */
+/* Prefs, AI & integrations                                           */
 /* ================================================================== */
 
-export function updateSettings(patch: Partial<Settings>) {
-  set((s) => ({ settings: { ...s.settings, ...patch } }));
+export function updatePrefs(patch: Partial<Prefs>) {
+  set((s) => ({ prefs: { ...s.prefs, ...patch } }));
   applyContexts();
 }
 
@@ -215,80 +204,78 @@ export async function connectReverb(token: string, env: "production" | "sandbox"
   await refreshIntegrations();
   return r;
 }
-
 export async function disconnectMarketplace(id: MarketplaceId) {
   await ADAPTERS[id].disconnect();
   await refreshIntegrations();
 }
 
 /* ================================================================== */
-/* Products & Living Listing                                          */
+/* Items                                                              */
 /* ================================================================== */
 
-export function createProduct(p: Omit<Product, "id" | "createdAt">) {
+export type NewItem = Omit<Product, "id" | "createdAt" | "status" | "dismissedTips" | "facts"> & { facts?: Fact[] };
+
+export function createItem(p: NewItem) {
   const id = uid("p");
-  set((s) => ({ products: [{ ...p, id, createdAt: now() }, ...s.products] }));
+  set((s) => ({ products: [{ ...p, facts: p.facts ?? [], id, createdAt: now(), status: "draft", dismissedTips: [] }, ...s.products] }));
+  log("listing_prepared", id, `Listing prepared: ${p.title}`, p.demo);
   return id;
 }
 
-export function updateProduct(id: string, patch: Partial<Product>) {
+export function updateItem(id: string, patch: Partial<Product>) {
   patchProduct(id, () => patch);
 }
 
-export function deleteProduct(id: string) {
+export function deleteItem(id: string) {
   set((s) => ({
     products: s.products.filter((p) => p.id !== id),
     listings: s.listings.filter((l) => l.productId !== id),
     conversations: s.conversations.filter((c) => c.productId !== id),
-    tasks: s.tasks.filter((t) => t.productId !== id),
-    deals: s.deals.filter((d) => d.productId !== id),
+    questions: s.questions.filter((q) => q.productId !== id),
+    offers: s.offers.filter((o) => o.productId !== id),
+    activity: s.activity.filter((a) => a.productId !== id),
   }));
 }
 
-export function makeFact(data: Pick<Fact, "topic" | "question" | "answer" | "source" | "inListing"> & { evidenceIds?: string[] }): Fact {
-  return { id: uid("f"), createdAt: now(), evidenceIds: [], ...data };
+export function makeFact(topic: string, question: string, answer: string, inListing = false): Fact {
+  return { id: uid("f"), topic, question, answer, source: "seller", createdAt: now(), inListing };
 }
 
 export function addFact(productId: string, fact: Fact) {
-  patchProduct(productId, (p) => ({ facts: [...p.facts.filter((f) => f.topic !== fact.topic || f.question !== fact.question), fact] }));
+  patchProduct(productId, (p) => ({ facts: [...p.facts.filter((f) => f.topic !== fact.topic), fact] }));
 }
-
 export function removeFact(productId: string, factId: string) {
   patchProduct(productId, (p) => ({ facts: p.facts.filter((f) => f.id !== factId) }));
 }
 
-/** Rebuild listing text for a product; pushes the change to live listings where the adapter supports it. */
+/** Change the asking price (from a strategy tip or the item page) and sync live listings. */
+export async function setPrice(productId: string, desired: number, minimum?: number | null) {
+  patchProduct(productId, (p) => ({
+    pricing: { ...p.pricing, desired, minimum: minimum === undefined ? Math.min(p.pricing.minimum ?? desired, desired) : minimum },
+  }));
+  await syncListingText(productId);
+}
+
+export function dismissTip(productId: string, tipId: string) {
+  patchProduct(productId, (p) => ({ dismissedTips: [...p.dismissedTips, tipId] }));
+}
+
+/** Rebuild listing text and push it to live listings where the marketplace supports updates. */
 export async function syncListingText(productId: string) {
   const p = product(productId);
   if (!p) return;
-  const ls = getState().listings.filter((l) => l.productId === productId);
-  for (const l of ls) {
+  for (const l of getState().listings.filter((x) => x.productId === productId)) {
     const next = { title: listingTitle(p, l.marketplace), description: listingDescription(p, l.marketplace), price: p.pricing.desired };
     patchListing(l.id, next);
-    const adapter = ADAPTERS[l.marketplace];
-    if (l.externalId && adapter.capabilities.update && (l.status === "active" || l.status === "moderation")) {
+    const a = ADAPTERS[l.marketplace];
+    if (l.externalId && a.capabilities.update && (l.status === "active" || l.status === "moderation")) {
       try {
-        await adapter.update({ ...l, ...next }, p);
+        await a.update({ ...l, ...next }, p);
       } catch (e) {
         patchListing(l.id, { note: `Update failed: ${e instanceof Error ? e.message : "error"}` });
       }
     }
   }
-}
-
-export async function approveListingUpdate(productId: string, updateId: string) {
-  const p = product(productId);
-  const u = p?.pendingListingUpdates.find((x) => x.id === updateId);
-  if (!p || !u) return;
-  patchProduct(productId, (pp) => ({
-    facts: pp.facts.map((f) => (f.id === u.factId ? { ...f, inListing: true } : f)),
-    pendingListingUpdates: pp.pendingListingUpdates.filter((x) => x.id !== updateId),
-  }));
-  await syncListingText(productId);
-}
-
-export function dismissListingUpdate(productId: string, updateId: string) {
-  patchProduct(productId, (p) => ({ pendingListingUpdates: p.pendingListingUpdates.filter((x) => x.id !== updateId) }));
 }
 
 /* ================================================================== */
@@ -297,15 +284,11 @@ export function dismissListingUpdate(productId: string, updateId: string) {
 
 export function prepareListings(productId: string, markets: MarketplaceId[]) {
   const p = product(productId);
-  if (!p) return;
+  if (!p) return [];
   const existing = new Set(getState().listings.filter((l) => l.productId === productId).map((l) => l.marketplace));
   const fresh = markets.filter((m) => !existing.has(m)).map((m) => draftListing(p, m));
   set((s) => ({ listings: [...s.listings, ...fresh] }));
-  if (p.status === "draft") patchProduct(productId, () => ({ status: "ready" }));
-}
-
-export function updateListing(id: string, patch: Partial<Listing>) {
-  patchListing(id, patch);
+  return getState().listings.filter((l) => l.productId === productId && markets.includes(l.marketplace));
 }
 
 export function removeListing(id: string) {
@@ -336,28 +319,39 @@ async function hostPhotos(productId: string): Promise<Product | undefined> {
   return product(productId);
 }
 
+const inFlight = new Set<string>();
+
+/** Publish one listing. Idempotent: never publishes the same listing twice. */
 export async function publishListing(id: string) {
   const l = getState().listings.find((x) => x.id === id);
   let p = l && product(l.productId);
   if (!l || !p) return;
+  if (inFlight.has(id) || l.externalId || ["publishing", "active", "moderation", "exported", "sold"].includes(l.status)) return;
+  inFlight.add(id);
+  const a = ADAPTERS[l.marketplace];
   patchListing(id, { status: "publishing", note: undefined });
+  log("publication_submitted", p.id, `Publication submitted to ${a.name}`, isDemo(l));
   try {
-    if (ADAPTERS[l.marketplace].capabilities.publish && l.marketplace !== "mock") p = (await hostPhotos(p.id)) ?? p;
-    const r = await ADAPTERS[l.marketplace].publish(l, p);
+    if (a.capabilities.publish && l.marketplace !== "mock") p = (await hostPhotos(p.id)) ?? p;
+    const r = await a.publish(l, p);
     patchListing(id, { ...r, publishedAt: now() });
-    patchProduct(p.id, () => ({ status: "listed" }));
-    notify({
-      kind: "listing",
-      title: r.status === "exported" ? `Ready to post on ${ADAPTERS[l.marketplace].name}` : `Published on ${ADAPTERS[l.marketplace].name}`,
-      body: r.note ?? p.title,
-      href: `/products/${p.id}`,
-    });
+    patchProduct(p.id, () => ({ status: "selling" }));
+    log(
+      "published",
+      p.id,
+      r.status === "exported" ? `Draft ready to post on ${a.name} (manual)` : `Live on ${a.name}${l.marketplace === "mock" ? " (demo marketplace)" : ""}`,
+      isDemo(l),
+    );
   } catch (e) {
-    patchListing(id, { status: "error", note: e instanceof Error ? e.message : "Publishing failed" });
+    const msg = e instanceof Error ? e.message : "Publishing failed";
+    patchListing(id, { status: "error", note: msg });
+    log("publish_failed", p.id, `${a.name}: ${msg}`, isDemo(l));
+  } finally {
+    inFlight.delete(id);
   }
 }
 
-export function markExportedPosted(id: string, url: string) {
+export function markPostedManually(id: string, url: string) {
   patchListing(id, { status: "active", url: url || undefined, publishedAt: now(), note: "Posted manually by you." });
 }
 
@@ -378,8 +372,15 @@ export async function setListingAvailability(id: string, active: boolean, soldHe
     const status = await ADAPTERS[l.marketplace].setAvailability(l, active, soldHere);
     patchListing(id, { status });
   } catch (e) {
-    patchListing(id, { note: e instanceof Error ? e.message : "Couldn't change availability" });
+    patchListing(id, { note: `Couldn't change availability: ${e instanceof Error ? e.message : "error"}` });
   }
+}
+
+/** Sell flow: approve → activate autopilot → publish to the chosen marketplaces. */
+export async function activateAutopilot(productId: string, markets: MarketplaceId[]) {
+  patchProduct(productId, () => ({ autopilot: true }));
+  const ls = prepareListings(productId, markets);
+  await Promise.all(ls.map((l) => publishListing(l.id)));
 }
 
 /* ================================================================== */
@@ -408,7 +409,7 @@ async function phrase(d: AgentDecision, p: Product, c: Conversation, buyerText: 
 async function deliver(cid: string, mid: string) {
   const c = convo(cid);
   const m = c?.messages.find((x) => x.id === mid);
-  if (!c || !m) return;
+  if (!c || !m || m.status === "sent") return;
   if (c.demo || !c.externalThreadId) {
     patchMessage(cid, mid, { status: "sent" });
     return;
@@ -421,27 +422,30 @@ async function deliver(cid: string, mid: string) {
   }
 }
 
-/** Runs the agent on a new buyer message: knowledge lookup → policy → reply/approval → tasks/deals/notifications. */
-export async function agentHandle(cid: string, buyerText: string, opts: { followUp?: boolean } = {}) {
+const handled = new Set<string>();
+
+/** Agent handles one buyer message: facts → policy/strategy → reply → offers/questions/notifications. */
+async function agentHandle(cid: string, buyerMsgId: string, buyerText: string, opts: { followUp?: boolean } = {}) {
+  const key = `${cid}:${buyerMsgId}:${opts.followUp ? "f" : ""}`;
+  if (handled.has(key)) return; // never answer the same message twice
+  handled.add(key);
   const c = convo(cid);
   const p = c && product(c.productId);
   if (!c || !p) return;
-  const base = getState().settings;
-  // Agent off for this product → everything waits for the seller.
-  const settings = p.agentEnabled ? base : { ...base, mode: "manual" as const };
-  const d = decide(p, c, buyerText, settings);
+  const demo = isDemo(c);
+  const d = decide(p, c, buyerText);
   if (opts.followUp) {
-    // Answering an earlier question after the seller verified it: no new deals or tasks.
-    d.deal = undefined;
-    d.task = undefined;
+    d.offer = undefined;
+    d.question = undefined;
     d.reply = `Update on your question (“${buyerText.trim()}”): ${d.reply}`;
   }
   const { text, phrased } = await phrase(d, p, c, buyerText);
-  const approval = needsApproval(d, settings, p.pricing.negotiationEnabled);
+  const approval = needsApproval(p.autopilot);
   const mid = uid("m");
 
   patchConvo(cid, (cc) => ({
     lowOfferCount: cc.lowOfferCount + (d.lowOffer ? 1 : 0),
+    lastCounter: d.counter ?? cc.lastCounter,
     messages: [
       ...cc.messages,
       {
@@ -450,64 +454,73 @@ export async function agentHandle(cid: string, buyerText: string, opts: { follow
         text,
         status: approval ? "pending_approval" : "sent",
         createdAt: now(),
-        category: d.category,
         rationale: `${d.rationale}${phrased ? " Worded by Claude, checked by the price guard." : ""}`,
       },
     ],
   }));
   if (!approval) await deliver(cid, mid);
 
-  if (d.task) {
-    const existing = getState().tasks.find((t) => t.productId === p.id && t.topic === d.task!.topic && t.status === "open");
-    if (!existing) {
+  const name = shortName(p).toLowerCase();
+  if (approval) {
+    log("approval_requested", p.id, `Reply to ${c.buyerRef} is waiting for your approval`, demo);
+    notify({ title: "Reply waiting for your OK", body: `${shortName(p)} · “${buyerText.slice(0, 70)}”`, href: `/inbox?c=${cid}` });
+  } else if (d.counter != null) log("counteroffer_sent", p.id, `Countered ${c.buyerRef} at ${money(d.counter, p.pricing.currency)}`, demo);
+  else if (d.intent === "question" && !d.question) log("question_answered", p.id, `Answered ${c.buyerRef}: “${buyerText.slice(0, 60)}”`, demo);
+
+  if (d.question) {
+    const exists = getState().questions.find((q) => q.productId === p.id && q.topic === d.question!.topic && q.status === "open");
+    if (!exists) {
       set((s) => ({
-        tasks: [{ id: uid("t"), productId: p.id, conversationId: cid, buyerQuestion: buyerText, status: "open", createdAt: now(), ...d.task! }, ...s.tasks],
+        questions: [
+          { id: uid("q"), productId: p.id, conversationId: cid, buyerQuestion: buyerText, status: "open", createdAt: now(), ...d.question! },
+          ...s.questions,
+        ],
       }));
-      if (settings.notifications.verificationTasks)
-        notify({ kind: "verification", title: "A buyer asked something we can't verify", body: d.task.question, href: "/inbox?tab=tasks" });
+      log("question_for_seller", p.id, `A buyer asked something only you know: “${buyerText.slice(0, 60)}”`, demo);
+      notify({ title: "A buyer asked something only you know", body: d.question.question, href: "/inbox?tab=questions" });
     }
   }
 
-  if (d.deal) {
-    const verified = p.facts.length === 0 ? "unverified" : p.sellerQuestions.every((q) => q.answer) ? "verified" : "partially_verified";
-    const deal: DealRequest = {
-      id: uid("d"),
+  if (d.offer) {
+    // One open offer per conversation: a newer one replaces the older pending one.
+    const offer: Offer = {
+      id: uid("o"),
       productId: p.id,
       conversationId: cid,
       marketplace: c.marketplace,
       buyerRef: c.buyerRef,
-      kind: d.deal.kind,
-      offeredPrice: d.deal.offeredPrice,
+      kind: d.offer.kind,
+      price: d.offer.price,
       currency: p.pricing.currency,
-      conditions: d.deal.conditions || "To be agreed",
+      when: d.offer.when,
       summary: summarize(c, buyerText),
-      verification: verified,
-      approval: "pending",
+      status: "pending",
       createdAt: now(),
     };
-    set((s) => ({ deals: [deal, ...s.deals] }));
-    if (settings.notifications.dealRequests)
-      notify({
-        kind: "deal",
-        title: d.deal.kind === "inspection" ? "A buyer wants to see the item" : "A buyer is ready to proceed",
-        body: `${p.title} · ${money(deal.offeredPrice, deal.currency)}`,
-        href: "/deals",
-      });
+    set((s) => ({ offers: [offer, ...s.offers.filter((o) => !(o.conversationId === cid && o.status === "pending"))] }));
+    log("offer_received", p.id, `${c.buyerRef} is ready: ${money(offer.price, offer.currency)}${offer.when ? ` · ${offer.when}` : ""}`, demo);
+    notify({
+      title:
+        offer.kind === "meeting"
+          ? `Someone wants to see your ${name}${offer.when ? ` ${offer.when}` : ""}`
+          : `Good news! Someone wants to buy your ${name} for ${money(offer.price, offer.currency)}${offer.when ? ` and pick it up ${offer.when}` : ""}.`,
+      body: `${c.buyerRef}${demo ? " (demo buyer)" : ""} · Accept, reject or counter.`,
+      href: "/inbox?tab=offers",
+      offerId: offer.id,
+    });
   }
 
-  if (d.escalate) notify({ kind: "approval", title: d.escalate, body: `${p.title} · “${buyerText.slice(0, 80)}”`, href: `/inbox?c=${cid}` });
-  else if (approval && settings.notifications.approvals)
-    notify({ kind: "approval", title: "Reply waiting for your approval", body: `${p.title} · “${buyerText.slice(0, 80)}”`, href: `/inbox?c=${cid}` });
+  if (d.escalate) notify({ title: d.escalate, body: `${shortName(p)} · “${buyerText.slice(0, 80)}”`, href: `/inbox?c=${cid}` });
 }
 
 function summarize(c: Conversation, latest: string) {
-  const buyer = [...c.messages.filter((m) => m.role === "buyer").map((m) => m.text), latest];
+  const buyer = [...c.messages.filter((m) => m.role === "buyer").map((m) => m.text)];
+  if (!buyer.includes(latest)) buyer.push(latest);
   const offers = buyer.map(parseOffer).filter((n): n is number => n != null);
-  const asked = buyer.filter((t) => t.includes("?")).slice(-2);
   return [
     `${buyer.length} buyer message${buyer.length > 1 ? "s" : ""}.`,
-    offers.length ? `Offers mentioned: ${offers.join(", ")}.` : "",
-    asked.length ? `Asked: ${asked.map((a) => `“${a}”`).join(" ")}` : "",
+    offers.length ? `Prices mentioned: ${offers.join(", ")}.` : "",
+    c.lastCounter ? `Agent's last counteroffer: ${c.lastCounter}.` : "",
     `Latest: “${latest}”`,
   ]
     .filter(Boolean)
@@ -515,20 +528,19 @@ function summarize(c: Conversation, latest: string) {
 }
 
 export async function receiveBuyerMessage(cid: string, text: string, externalId?: string) {
-  patchConvo(cid, (c) => ({
-    unread: true,
-    messages: [...c.messages, { id: uid("m"), role: "buyer", text, status: "received", createdAt: now(), externalId }],
-  }));
-  await agentHandle(cid, text);
+  const c = convo(cid);
+  if (!c) return;
+  if (externalId && c.messages.some((m) => m.externalId === externalId)) return; // duplicate from a sync
+  const mid = uid("m");
+  patchConvo(cid, (cc) => ({ unread: true, messages: [...cc.messages, { id: mid, role: "buyer", text, status: "received", createdAt: now(), externalId }] }));
+  await agentHandle(cid, mid, text);
 }
 
 export async function approveMessage(cid: string, mid: string, text: string) {
-  patchMessage(cid, mid, { text, status: "sent" });
+  patchMessage(cid, mid, { text, status: "pending_approval" });
   const c = convo(cid);
-  if (c && !c.demo && c.externalThreadId) {
-    patchMessage(cid, mid, { status: "pending_approval" });
-    await deliver(cid, mid);
-  }
+  if (c && (c.demo || !c.externalThreadId)) patchMessage(cid, mid, { status: "sent" });
+  else await deliver(cid, mid);
 }
 
 export function discardMessage(cid: string, mid: string) {
@@ -546,81 +558,68 @@ export function markConversationRead(cid: string) {
 }
 
 /* ================================================================== */
-/* Proof-to-Deal: verification                                        */
+/* Questions for the seller                                           */
 /* ================================================================== */
 
-export async function submitVerification(
-  taskId: string,
-  input: { answer: string; file?: File; inListing: boolean },
-) {
-  const t = getState().tasks.find((x) => x.id === taskId);
-  if (!t) return;
-  const evidence: Evidence[] = [];
-  if (input.file) {
-    const blobKey = uid("ev");
-    await putFile(blobKey, input.file);
-    evidence.push({
-      id: uid("e"),
-      kind: input.file.type.startsWith("video/") ? "video" : "photo",
-      fileName: input.file.name,
-      mime: input.file.type,
-      size: input.file.size,
-      blobKey,
-      createdAt: now(),
-    });
-  }
-  const fact = makeFact({
-    topic: t.topic,
-    question: t.question,
-    answer: input.answer.trim(),
-    source: evidence.length ? "evidence" : "seller",
-    inListing: false,
-    evidenceIds: evidence.map((e) => e.id),
-  });
-  patchProduct(t.productId, (p) => ({
-    evidence: [...p.evidence, ...evidence],
-    facts: [...p.facts.filter((f) => f.topic !== fact.topic), fact],
-    pendingListingUpdates: input.inListing
-      ? [...p.pendingListingUpdates, { id: uid("u"), factId: fact.id, text: fact.answer }]
-      : p.pendingListingUpdates,
-  }));
-  set((s) => ({ tasks: s.tasks.map((x) => (x.id === taskId ? { ...x, status: "done", factId: fact.id } : x)) }));
-
-  // Follow up with the buyer who asked, using the newly verified knowledge.
-  const c = t.conversationId && convo(t.conversationId);
-  if (c && t.buyerQuestion) await agentHandle(c.id, t.buyerQuestion, { followUp: true });
+export async function answerQuestion(qid: string, answer: string, inListing: boolean) {
+  const q = getState().questions.find((x) => x.id === qid);
+  if (!q || !answer.trim() || q.status !== "open") return;
+  addFact(q.productId, makeFact(q.topic, q.question, answer.trim(), inListing));
+  set((s) => ({ questions: s.questions.map((x) => (x.id === qid ? { ...x, status: "answered" } : x)) }));
+  if (inListing) await syncListingText(q.productId);
+  if (q.conversationId) await agentHandle(q.conversationId, q.id, q.buyerQuestion, { followUp: true });
 }
 
-export function dismissTask(taskId: string) {
-  set((s) => ({ tasks: s.tasks.map((t) => (t.id === taskId ? { ...t, status: "dismissed" } : t)) }));
+export function dismissQuestion(qid: string) {
+  set((s) => ({ questions: s.questions.map((q) => (q.id === qid ? { ...q, status: "dismissed" } : q)) }));
 }
 
 /* ================================================================== */
-/* Deal Center                                                        */
+/* Buyer offers                                                       */
 /* ================================================================== */
 
-export async function decideDeal(dealId: string, approve: boolean, note: string) {
-  const d = getState().deals.find((x) => x.id === dealId);
-  if (!d) return;
-  set((s) => ({ deals: s.deals.map((x) => (x.id === dealId ? { ...x, approval: approve ? "approved" : "declined", decidedAt: now() } : x)) }));
-  // The seller's decision is relayed to the buyer as a seller-authored message.
-  const text = approve
-    ? note || (d.kind === "inspection" ? "The seller confirmed — let's arrange a time to see the item." : "The seller accepted. Let's arrange the details.")
-    : note || "Thanks for your interest — the seller decided not to go ahead with this one.";
-  await sendSellerMessage(d.conversationId, text);
+function decideOffer(id: string, status: Offer["status"]) {
+  set((s) => ({ offers: s.offers.map((o) => (o.id === id ? { ...o, status, decidedAt: now() } : o)) }));
 }
 
-export async function completeDeal(dealId: string, finalPrice: number | null) {
-  const d = getState().deals.find((x) => x.id === dealId);
-  if (!d) return;
-  set((s) => ({
-    deals: s.deals.map((x) => (x.id === dealId ? { ...x, approval: "completed", offeredPrice: finalPrice ?? x.offeredPrice, decidedAt: now() } : x)),
-  }));
-  patchProduct(d.productId, () => ({ status: "sold" }));
-  for (const l of getState().listings.filter((x) => x.productId === d.productId && x.status !== "draft")) {
-    await setListingAvailability(l.id, false, l.marketplace === d.marketplace);
+export async function acceptOffer(id: string, note = "") {
+  const o = getState().offers.find((x) => x.id === id);
+  const p = o && product(o.productId);
+  if (!o || !p || o.status !== "pending") return;
+  decideOffer(id, "accepted");
+  const where = p.logistics.pickup ? `Pickup${p.logistics.area ? ` near ${p.logistics.area}` : ""}${o.when ? ` ${o.when}` : ""} works` : p.logistics.shipping ? "I'll ship it" : "";
+  await sendSellerMessage(o.conversationId, note || `Deal — ${money(o.price, o.currency)} works.${where ? ` ${where}.` : ""} Please confirm a time that suits you.`);
+  log("deal_accepted", p.id, `You accepted ${money(o.price, o.currency)} from ${o.buyerRef}`, isDemo(o));
+}
+
+export async function rejectOffer(id: string, note = "") {
+  const o = getState().offers.find((x) => x.id === id);
+  if (!o || o.status !== "pending") return;
+  decideOffer(id, "rejected");
+  await sendSellerMessage(o.conversationId, note || "Thanks for your interest — I'll pass on this offer.");
+  log("deal_rejected", o.productId, `You declined ${o.buyerRef}'s offer`, isDemo(o));
+}
+
+export async function counterOffer(id: string, price: number) {
+  const o = getState().offers.find((x) => x.id === id);
+  if (!o || o.status !== "pending") return;
+  decideOffer(id, "countered");
+  patchConvo(o.conversationId, () => ({ lastCounter: price }));
+  await sendSellerMessage(o.conversationId, `I can do ${money(price, o.currency)}. Let me know if that works.`);
+  log("counteroffer_sent", o.productId, `You countered ${o.buyerRef} at ${money(price, o.currency)}`, isDemo(o));
+}
+
+/** Seller confirms the item changed hands → item sold, listings ended where supported. */
+export async function markSold(offerId: string) {
+  const o = getState().offers.find((x) => x.id === offerId);
+  if (!o || o.status !== "accepted") return;
+  decideOffer(offerId, "sold");
+  patchProduct(o.productId, () => ({ status: "sold" }));
+  for (const l of getState().listings.filter((x) => x.productId === o.productId && x.status !== "draft")) {
+    await setListingAvailability(l.id, false, l.marketplace === o.marketplace);
     if (!getState().listings.find((x) => x.id === l.id)?.note?.startsWith("Couldn't")) patchListing(l.id, { status: "sold" });
   }
+  log("sold", o.productId, `Sold for ${money(o.price, o.currency)}`, isDemo(o));
 }
 
 /* ================================================================== */
@@ -635,66 +634,71 @@ export function markAllRead() {
 }
 
 /* ================================================================== */
-/* OLX sync (real conversations)                                      */
+/* Sync with connected marketplaces (real conversations)              */
 /* ================================================================== */
+
+const syncing = new Set<MarketplaceId>();
 
 export async function syncMarketplaceThreads(id: MarketplaceId) {
   const adapter = ADAPTERS[id];
-  if (!adapter.capabilities.threads || id === "mock") return 0;
-  const threads = await adapter.listThreads();
+  if (!adapter.capabilities.threads || id === "mock" || syncing.has(id)) return 0;
+  syncing.add(id);
   let fresh = 0;
-  for (const t of threads) {
-    const listing = getState().listings.find((l) => l.marketplace === id && l.externalId === t.advertId);
-    if (!listing) continue; // only threads about listings UNLOAD published
-    let c = getState().conversations.find((x) => x.marketplace === id && x.externalThreadId === t.id);
-    if (!c) {
-      c = {
-        id: uid("c"),
-        productId: listing.productId,
-        marketplace: id,
-        externalThreadId: t.id,
-        buyerRef: t.buyerRef,
-        demo: false,
-        messages: [],
-        lowOfferCount: 0,
-        updatedAt: t.updatedAt,
-        unread: true,
-      };
-      const created = c;
-      set((s) => ({ conversations: [created, ...s.conversations] }));
-    }
-    const known = new Set(c.messages.map((m) => m.externalId).filter(Boolean));
-    const msgs = (await adapter.listMessages(t.id)).sort((a, b) => a.createdAt - b.createdAt);
-    for (const m of msgs) {
-      if (known.has(m.id)) continue;
-      if (m.fromBuyer) {
-        fresh++;
-        await receiveBuyerMessage(c.id, m.text, m.id);
-      } else {
-        patchConvo(c.id, (cc) => ({
-          messages: [...cc.messages, { id: uid("m"), role: "seller", text: m.text, status: "sent", createdAt: m.createdAt, externalId: m.id }],
-        }));
+  try {
+    for (const t of await adapter.listThreads()) {
+      const listing = getState().listings.find((l) => l.marketplace === id && l.externalId === t.advertId);
+      if (!listing) continue; // only threads about listings UNLOAD published
+      let c = getState().conversations.find((x) => x.marketplace === id && x.externalThreadId === t.id);
+      if (!c) {
+        c = {
+          id: uid("c"),
+          productId: listing.productId,
+          marketplace: id,
+          externalThreadId: t.id,
+          buyerRef: t.buyerRef,
+          demo: false,
+          messages: [],
+          lastCounter: null,
+          lowOfferCount: 0,
+          updatedAt: t.updatedAt,
+          unread: true,
+        };
+        const created = c;
+        set((s) => ({ conversations: [created, ...s.conversations] }));
+      }
+      const known = new Set(c.messages.map((m) => m.externalId).filter(Boolean));
+      for (const m of (await adapter.listMessages(t.id)).sort((a, b) => a.createdAt - b.createdAt)) {
+        if (known.has(m.id)) continue;
+        if (m.fromBuyer) {
+          fresh++;
+          await receiveBuyerMessage(c.id, m.text, m.id);
+        } else
+          patchConvo(c.id, (cc) => ({
+            messages: [...cc.messages, { id: uid("m"), role: "seller", text: m.text, status: "sent", createdAt: m.createdAt, externalId: m.id }],
+          }));
       }
     }
+  } finally {
+    syncing.delete(id);
   }
   return fresh;
 }
 
 /* ================================================================== */
-/* Demo buyers (clearly labeled, Demo Market only)                    */
+/* Demo buyers (clearly labeled, demo marketplace only)               */
 /* ================================================================== */
 
 const BUYERS = ["Alex", "Sam", "Jordan", "Taylor", "Riley", "Casey"];
 
 export function demoScript(p: Product): string[] {
-  const unknown = p.sellerQuestions.find((q) => !q.answer && !p.facts.some((f) => f.topic === q.topic));
-  const desired = p.pricing.desired;
-  const low = desired ? Math.round((desired * 0.8) / 5) * 5 : null;
+  const desired = p.pricing.desired ?? 100;
+  const low = Math.round((desired * 0.8) / 5) * 5;
+  const cur = p.pricing.currency === "KZT" ? (n: number) => `${n} тг` : (n: number) => `$${n}`;
   return [
     "Hi! Is this still available?",
-    p.title.toLowerCase().includes("monitor") ? "Does the HDMI port actually work?" : unknown ? unknown.question : "Any scratches or other wear?",
-    low ? `Would you accept ${p.pricing.currency === "KZT" ? `${low} тг` : `$${low}`}?` : "What's your best price?",
-    "OK, sounds fair. Can I come see it tomorrow evening?",
+    p.title.toLowerCase().includes("monitor") ? "Does it come with the power cable?" : "Any scratches or other wear?",
+    `Would you take ${cur(low)}?`,
+    "OK, deal. Can I pick it up tomorrow evening?",
   ];
 }
 
@@ -709,6 +713,7 @@ export function startDemoConversation(productId: string) {
     buyerRef: `Demo buyer · ${BUYERS[used % BUYERS.length]}`,
     demo: true,
     messages: [],
+    lastCounter: null,
     lowOfferCount: 0,
     updatedAt: now(),
     unread: true,
@@ -717,7 +722,14 @@ export function startDemoConversation(productId: string) {
   return c.id;
 }
 
-/** Conversation for a marketplace without a messaging API: seller pastes buyer messages, copies replies back. */
+export function nextDemoLine(cid: string) {
+  const c = convo(cid);
+  const p = c && product(c.productId);
+  if (!c || !p || !c.demo) return null;
+  return demoScript(p)[c.messages.filter((m) => m.role === "buyer").length] ?? null;
+}
+
+/** For marketplaces without a messaging API: seller pastes buyer messages, copies replies back. */
 export function createManualConversation(productId: string, marketplace: MarketplaceId, buyerRef: string) {
   const c: Conversation = {
     id: uid("c"),
@@ -726,6 +738,7 @@ export function createManualConversation(productId: string, marketplace: Marketp
     buyerRef: buyerRef || "Buyer",
     demo: false,
     messages: [],
+    lastCounter: null,
     lowOfferCount: 0,
     updatedAt: now(),
     unread: false,
@@ -734,45 +747,31 @@ export function createManualConversation(productId: string, marketplace: Marketp
   return c.id;
 }
 
-/** Next scripted buyer line for a demo conversation, or null when the script is done. */
-export function nextDemoLine(cid: string) {
-  const c = convo(cid);
-  const p = c && product(c.productId);
-  if (!c || !p || !c.demo) return null;
-  const sent = c.messages.filter((m) => m.role === "buyer").length;
-  return demoScript(p)[sent] ?? null;
-}
-
-/* ================================================================== */
-/* Workspace                                                          */
-/* ================================================================== */
-
-/** One sample product, published to the simulated Demo Market, with a scripted buyer. */
-export async function loadDemoProduct(sampleId = "monitor") {
-  const sample = SAMPLES.find((s) => s.id === sampleId) ?? SAMPLES[0];
-  const d = sample.draft();
+/** One-click sample: monitor, $150 / min $130, live on the demo marketplace. */
+export async function loadSampleItem(goal: Goal = "fast") {
+  const s = SAMPLES[0];
+  const d = s.draft();
   const answered = d.sellerQuestions.map((q) =>
-    q.topic === "charger" ? { ...q, answer: "Yes, the original power cable is included." } : q.topic === "dead pixels" ? { ...q, answer: "No dead pixels and no scratches on the screen." } : q,
+    q.topic === "charger"
+      ? { ...q, answer: "Yes, the original power cable is included." }
+      : q.topic === "dead pixels"
+        ? { ...q, answer: "No dead pixels and no scratches on the screen." }
+        : q,
   );
-  const id = createProduct({
+  const id = createItem({
     ...d,
     sellerQuestions: answered,
-    status: "draft",
+    facts: answered.filter((q) => q.answer).map((q) => makeFact(q.topic, q.question, q.answer!, true)),
     demo: true,
-    photos: sample.photos,
-    facts: [],
-    evidence: [],
-    pricing: { currency: "USD", desired: 150, minimum: 130, negotiationEnabled: true, maxDiscountPct: 15 },
-    pendingListingUpdates: [],
+    photos: s.photos,
+    goal,
+    pricing: { currency: "USD", desired: 150, minimum: Math.max(130, suggestedMinimum(150, goal)) },
+    autopilot: true,
+    logistics: { pickup: true, shipping: false, area: "" },
     analysis: { source: "demo", at: now() },
-    agentEnabled: true,
   });
-  for (const q of answered)
-    if (q.answer) addFact(id, makeFact({ topic: q.topic, question: q.question, answer: q.answer, source: "seller", inListing: true }));
   await mockAdapter.connect();
-  prepareListings(id, ["mock"]);
-  const l = getState().listings.find((x) => x.productId === id && x.marketplace === "mock");
-  if (l) await publishListing(l.id);
+  await activateAutopilot(id, ["mock"]);
   return id;
 }
 
@@ -780,7 +779,6 @@ export function resetWorkspace() {
   try {
     localStorage.removeItem("unload:mock-market");
   } catch {}
-  set((s) => ({ ...EMPTY, settings: s.settings, ai: s.ai, integrations: s.integrations }));
+  handled.clear();
+  set((s) => ({ ...EMPTY, prefs: s.prefs, ai: s.ai, integrations: s.integrations }));
 }
-
-export type { AutopilotSettings };

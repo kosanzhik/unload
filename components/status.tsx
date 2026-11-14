@@ -1,4 +1,4 @@
-import type { DealRequest, IntegrationState, ListingStatus, ProductStatus } from "@/lib/core/types";
+import type { IntegrationState, ListingStatus, Offer, ProductStatus } from "@/lib/core/types";
 import { Badge, type Tone } from "./ui";
 
 const INTEGRATION: Record<IntegrationState, [string, Tone]> = {
@@ -25,7 +25,7 @@ const LISTING: Record<ListingStatus, [string, Tone]> = {
   moderation: ["In moderation", "warning"],
   inactive: ["Inactive", "neutral"],
   sold: ["Sold", "dark"],
-  exported: ["Ready to post manually", "brand"],
+  exported: ["Ready to post yourself", "brand"],
   error: ["Error", "error"],
 };
 
@@ -40,39 +40,33 @@ export function ListingBadge({ status }: { status: ListingStatus }) {
 
 const PRODUCT: Record<ProductStatus, [string, Tone]> = {
   draft: ["Draft", "neutral"],
-  ready: ["Ready to publish", "brand"],
-  listed: ["Listed", "success"],
+  selling: ["Selling", "success"],
   sold: ["Sold", "dark"],
   archived: ["Archived", "neutral"],
 };
 
 export function ProductBadge({ status }: { status: ProductStatus }) {
   const [label, tone] = PRODUCT[status];
-  return <Badge tone={tone}>{label}</Badge>;
-}
-
-const DEAL: Record<DealRequest["approval"], [string, Tone]> = {
-  pending: ["Needs your decision", "warning"],
-  approved: ["Approved", "success"],
-  declined: ["Declined", "neutral"],
-  completed: ["Completed", "dark"],
-};
-
-export function DealBadge({ approval }: { approval: DealRequest["approval"] }) {
-  const [label, tone] = DEAL[approval];
   return (
-    <Badge tone={tone} dot>
+    <Badge tone={tone} dot={status === "selling"}>
       {label}
     </Badge>
   );
 }
 
-export function VerificationBadge({ v }: { v: DealRequest["verification"] }) {
-  const map: Record<DealRequest["verification"], [string, Tone]> = {
-    verified: ["Verified details", "success"],
-    partially_verified: ["Partly verified", "warning"],
-    unverified: ["Unverified", "neutral"],
-  };
-  const [label, tone] = map[v];
-  return <Badge tone={tone}>{label}</Badge>;
+const OFFER: Record<Offer["status"], [string, Tone]> = {
+  pending: ["Needs your decision", "warning"],
+  accepted: ["Accepted", "success"],
+  rejected: ["Declined", "neutral"],
+  countered: ["You countered", "brand"],
+  sold: ["Sold", "dark"],
+};
+
+export function OfferBadge({ status }: { status: Offer["status"] }) {
+  const [label, tone] = OFFER[status];
+  return (
+    <Badge tone={tone} dot>
+      {label}
+    </Badge>
+  );
 }

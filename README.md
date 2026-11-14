@@ -8,28 +8,24 @@ Live: https://unload-tau.vercel.app
 
 ## Flow
 
-1. Upload photos → AI drafts title, details and the few questions only the seller can answer.
-2. Seller confirms condition and facts (they become the item's verified knowledge base).
-3. Pricing rules: asking price, **private** minimum, counteroffers on/off, max discount.
-4. Connect marketplaces → approve publishing → enable the agent.
-5. The agent handles buyers (Manual / Assisted / Autopilot) and notifies the seller about deals, viewing requests and questions it can't verify.
+Photo → AI listing → choose a goal (**Sell Fast / Balanced / Get More Money**) → approve price and private minimum → **activate Autopilot** → get notified when a buyer is ready → Accept / Counter / Reject → Mark as sold.
 
 ## Architecture
 
 | Boundary | Code |
 |---|---|
-| Product management | `lib/store.ts` (products, listings), `app/(app)/products/*` |
-| AI vision & listing generation | `lib/server/claude.ts`, `app/api/ai/analyze`, `lib/vision/demo.ts`, `lib/listing/drafts.ts` |
-| Marketplace adapters | `lib/marketplaces/types.ts` (interface), `lib/marketplaces/registry.ts` (Mock, OLX, manual export), `lib/server/olx.ts` + `app/api/olx/*` |
-| Conversation management | `lib/store.ts` (`receiveBuyerMessage`, `syncMarketplaceThreads`), `app/(app)/inbox` |
-| AI sales agent | `lib/agent/salesAgent.ts` (intents → decision), `app/api/ai/reply` (optional Claude wording) |
-| Product knowledge base | `lib/knowledge/kb.ts`, facts/evidence on `Product` |
-| Negotiation policy engine | `lib/negotiation/policy.ts` (`evaluateOffer`, `guardReply`) |
-| Deal management | `DealRequest` in `lib/store.ts`, `app/(app)/deals` |
-| Notifications | `notify()` in `lib/store.ts` (in-app + optional browser notifications) |
-| Strategy | `lib/strategy/advisor.ts` (measured vs heuristic, no predictions) |
+| Items & listings | `lib/store.ts`, `app/(app)/sell`, `app/(app)/items/[id]` |
+| AI vision & listing text | `lib/server/claude.ts` (Anthropic key or Vercel AI Gateway), `app/api/ai/*`, `lib/listing/drafts.ts`, `lib/vision/demo.ts` |
+| AutoSale strategy engine | `lib/strategy/engine.ts` — goal profiles, suggested minimums, adaptive tips from real activity only |
+| Negotiation policy | `lib/negotiation/policy.ts` — counteroffer per goal, never below the minimum, price guard on every outgoing text |
+| Sales agent | `lib/agent/salesAgent.ts` — intents (question, offer, agreement, meeting, payment, off-platform), uses only seller-confirmed facts |
+| Offers & deals | `Offer` in `lib/store.ts`, `components/offer-card.tsx`, Inbox → Offers |
+| Marketplace adapters | `lib/marketplaces/*` (one interface), server routes `app/api/{olx,ebay,reverb}` |
+| Activity & notifications | truthful activity log + notifications in `lib/store.ts` |
 
-Safety rules enforced in code: the private minimum never appears in a reply (`guardReply` re-checks every outgoing text, including Claude's), unknown facts become verification tasks instead of guesses, and only the seller can approve a deal.
+Duplicate protection: a listing is never published twice, each buyer message is answered once, and synced marketplace messages are de-duplicated by external id.
+
+Tests: `npm test` (node:test) — negotiation policy, strategy engine and sales agent (23 tests).
 
 ## Integrations
 
@@ -52,7 +48,7 @@ OLX_CLIENT_SECRET=
 ```bash
 npm install
 npm run dev            # http://localhost:3000
-npm run check:agent    # agent + negotiation policy checks
+npm test               # business logic tests
 ```
 
 Data (products, chats, deals) is stored in the browser's localStorage; verification photos/videos in IndexedDB.

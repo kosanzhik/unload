@@ -91,12 +91,7 @@ export function knowledgeSheet(product: Product) {
     brand: product.brand || null,
     model: product.model || null,
     attributes: product.attributes,
-    verifiedFacts: product.facts.map((f) => ({
-      question: f.question,
-      answer: f.answer,
-      source: f.source,
-      hasEvidence: f.evidenceIds.length > 0,
-    })),
+    verifiedFacts: product.facts.map((f) => ({ question: f.question, answer: f.answer })),
     description: product.description,
   };
 }

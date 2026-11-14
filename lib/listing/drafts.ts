@@ -43,7 +43,7 @@ export function listingDescription(p: Product, m: MarketplaceId) {
 
   if (facts.length) {
     lines.push("", "Checked by the seller:");
-    facts.forEach((f) => lines.push(`• ${f.answer}${f.evidenceIds.length ? " (photo/video available on request)" : ""}`));
+    facts.forEach((f) => lines.push(`• ${f.answer}`));
   }
   if (m === "facebook" || m === "mercari") lines.push("", "Message me with any questions.");
   return clip(lines.join("\n"), LIMITS[m].description);

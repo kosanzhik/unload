@@ -150,8 +150,10 @@ export async function suggestCategory(text: string) {
     let leafHits = 0;
     let score = 0;
     for (const w of words) {
-      if (leaf.has(w)) (leafHits++, (score += 3));
-      else if (path.has(w)) score += 1;
+      if (leaf.has(w)) {
+        leafHits++;
+        score += 3;
+      } else if (path.has(w)) score += 1;
     }
     if (!leafHits) continue;
     if (/accessor|parts|pedals/i.test(c.full_name) && !/accessor|part|pedal|case|cable|stand/i.test(text)) score -= 2;

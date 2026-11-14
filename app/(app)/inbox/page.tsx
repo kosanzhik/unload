@@ -3,39 +3,29 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Bot,
-  ClipboardCopy,
-  FlaskConical,
-  Inbox as InboxIcon,
-  Loader2,
-  MessageSquarePlus,
-  Paperclip,
-  RefreshCw,
-  Send,
-  ShieldQuestion,
-  User,
-} from "lucide-react";
-import { PageHeader } from "@/components/chrome";
+import { Bot, ClipboardCopy, FlaskConical, HandCoins, Inbox as InboxIcon, Loader2, MessageSquarePlus, RefreshCw, Send, ShieldQuestion, User } from "lucide-react";
+import { OfferCard } from "@/components/offer-card";
 import { Badge, Button, Card, Empty, Help, Label, Modal, Note, Segmented, Thumb, timeAgo, useToast } from "@/components/ui";
-import type { Conversation, Message, MarketplaceId } from "@/lib/core/types";
+import type { Conversation, MarketplaceId, Message, Offer, Product } from "@/lib/core/types";
 import { ADAPTERS } from "@/lib/marketplaces/registry";
 import {
+  answerQuestion,
   approveMessage,
-  discardMessage,
   createManualConversation,
-  dismissTask,
+  discardMessage,
+  dismissQuestion,
   markConversationRead,
   nextDemoLine,
   receiveBuyerMessage,
   sendSellerMessage,
   startDemoConversation,
-  submitVerification,
   syncMarketplaceThreads,
   useApp,
   useHydrated,
 } from "@/lib/store";
 import { cn } from "@/lib/util";
+
+type Tab = "chats" | "offers" | "questions";
 
 export default function InboxPage() {
   return (
@@ -49,47 +39,52 @@ function Inbox() {
   const hydrated = useHydrated();
   const params = useSearchParams();
   const router = useRouter();
-  const tab = params.get("tab") === "tasks" ? "tasks" : "chats";
-  const tasks = useApp((s) => s.tasks);
-  const open = tasks.filter((t) => t.status === "open").length;
+  const tab: Tab = params.get("tab") === "offers" ? "offers" : params.get("tab") === "questions" ? "questions" : "chats";
+  const offers = useApp((s) => s.offers);
+  const questions = useApp((s) => s.questions);
+  const pendingOffers = offers.filter((o) => o.status === "pending").length;
+  const openQs = questions.filter((q) => q.status === "open").length;
   if (!hydrated) return null;
   return (
     <>
-      <PageHeader
-        title="AI Inbox"
-        sub="Every buyer conversation, what the agent replied, and what needs you."
-        action={
-          <Segmented
-            value={tab}
-            onChange={(v) => router.replace(v === "tasks" ? "/inbox?tab=tasks" : "/inbox")}
-            options={[
-              { value: "chats", label: "Conversations" },
-              { value: "tasks", label: `Verification${open ? ` (${open})` : ""}` },
-            ]}
-          />
-        }
-      />
-      {tab === "chats" ? <Chats /> : <Tasks />}
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-extrabold sm:text-3xl">AI Inbox</h1>
+          <p className="mt-1 text-ink-500">Your AI handles routine messages. Only decisions reach you.</p>
+        </div>
+        <Segmented<Tab>
+          value={tab}
+          onChange={(v) => router.replace(v === "chats" ? "/inbox" : `/inbox?tab=${v}`)}
+          options={[
+            { value: "chats", label: "Conversations" },
+            { value: "offers", label: `Offers${pendingOffers ? ` (${pendingOffers})` : ""}` },
+            { value: "questions", label: `For you${openQs ? ` (${openQs})` : ""}` },
+          ]}
+        />
+      </div>
+      {tab === "chats" && <Chats />}
+      {tab === "offers" && <Offers />}
+      {tab === "questions" && <Questions />}
     </>
   );
 }
 
 /* ================================================================== */
+/* Conversations                                                      */
+/* ================================================================== */
 
 function Chats() {
   const params = useSearchParams();
   const router = useRouter();
+  const toast = useToast();
   const conversations = useApp((s) => s.conversations);
   const products = useApp((s) => s.products);
-  const mode = useApp((s) => s.settings.mode);
-  const olxConnected = useApp((s) => s.integrations.olx?.state === "connected");
-  const [filter, setFilter] = useState<"all" | "needs">("all");
+  const integrations = useApp((s) => s.integrations);
   const [newOpen, setNewOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const toast = useToast();
+  const syncable = (["olx", "reverb"] as MarketplaceId[]).filter((m) => integrations[m]?.state === "connected");
 
-  const sorted = useMemo(() => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt), [conversations]);
-  const list = filter === "needs" ? sorted.filter((c) => c.messages.some((m) => m.status === "pending_approval")) : sorted;
+  const list = useMemo(() => [...conversations].sort((a, b) => b.updatedAt - a.updatedAt), [conversations]);
   const selected = conversations.find((c) => c.id === params.get("c")) ?? list[0];
 
   useEffect(() => {
@@ -99,26 +94,21 @@ function Chats() {
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
       <Card className={cn("flex flex-col overflow-hidden lg:h-[calc(100dvh-210px)]", params.get("c") && "hidden lg:flex")}>
-        <div className="flex flex-wrap items-center gap-2 border-b border-line p-3">
-          <Segmented
-            value={filter}
-            onChange={setFilter}
-            options={[
-              { value: "all", label: "All" },
-              { value: "needs", label: "Needs approval" },
-            ]}
-          />
+        <div className="flex items-center gap-2 border-b border-line p-3">
+          <p className="text-sm font-semibold">
+            {list.length} conversation{list.length === 1 ? "" : "s"}
+          </p>
           <div className="ml-auto flex gap-1">
-            {olxConnected && (
+            {syncable.length > 0 && (
               <Button
                 size="sm"
                 variant="ghost"
-                aria-label="Sync OLX messages"
+                aria-label="Check marketplaces for new messages"
                 onClick={async () => {
                   setSyncing(true);
                   try {
-                    const n = await syncMarketplaceThreads("olx");
-                    toast(n ? `${n} new OLX message${n > 1 ? "s" : ""}` : "OLX is up to date");
+                    const n = (await Promise.all(syncable.map((m) => syncMarketplaceThreads(m)))).reduce((a, b) => a + b, 0);
+                    toast(n ? `${n} new message${n > 1 ? "s" : ""}` : "Up to date");
                   } catch (e) {
                     toast(e instanceof Error ? e.message : "Sync failed");
                   } finally {
@@ -129,8 +119,8 @@ function Chats() {
                 {syncing ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
               </Button>
             )}
-            <Button size="sm" variant="secondary" onClick={() => setNewOpen(true)} aria-label="New conversation">
-              <MessageSquarePlus className="size-4" />
+            <Button size="sm" variant="secondary" onClick={() => setNewOpen(true)}>
+              <MessageSquarePlus className="size-4" /> New
             </Button>
           </div>
         </div>
@@ -139,9 +129,9 @@ function Chats() {
             <li>
               <Empty
                 icon={<InboxIcon className="size-5" />}
-                title={filter === "needs" ? "Nothing to approve" : "No conversations yet"}
-                body={filter === "needs" ? "Replies waiting for you will show up here." : "Real OLX chats sync here once connected. You can also start a clearly labeled demo buyer."}
-                action={filter === "all" && <Button onClick={() => setNewOpen(true)}>Start a conversation</Button>}
+                title="No conversations yet"
+                body="Buyer messages from connected marketplaces appear here. You can also start a clearly labeled demo buyer."
+                action={<Button onClick={() => setNewOpen(true)}>Start a conversation</Button>}
               />
             </li>
           )}
@@ -164,8 +154,7 @@ function Chats() {
                     <span className="block truncate text-xs text-ink-500">{p?.title}</span>
                     <span className="mt-1 flex items-center gap-1.5">
                       {c.demo ? <Badge tone="brand">Demo</Badge> : <Badge>{ADAPTERS[c.marketplace].name}</Badge>}
-                      {pending > 0 && <Badge tone="warning">{pending} to approve</Badge>}
-                      {!pending && last && <span className="truncate text-xs text-ink-400">{last.text}</span>}
+                      {pending > 0 ? <Badge tone="warning">Needs OK</Badge> : last && <span className="truncate text-xs text-ink-400">{last.text}</span>}
                     </span>
                   </span>
                 </button>
@@ -176,13 +165,12 @@ function Chats() {
       </Card>
 
       {selected ? (
-        <Thread key={selected.id} c={selected} mode={mode} />
+        <Thread key={selected.id} c={selected} p={products.find((x) => x.id === selected.productId)} />
       ) : (
         <Card className="hidden lg:block">
-          <Empty icon={<Bot className="size-5" />} title="Pick a conversation" body="The agent's drafts and reasoning appear here." />
+          <Empty icon={<Bot className="size-5" />} title="Pick a conversation" body="The AI's replies and its reasoning appear here." />
         </Card>
       )}
-
       <NewConversation open={newOpen} onClose={() => setNewOpen(false)} />
     </div>
   );
@@ -196,11 +184,11 @@ function NewConversation({ open, onClose }: { open: boolean; onClose: () => void
   const [pid, setPid] = useState("");
   const [market, setMarket] = useState<MarketplaceId>("facebook");
   const [buyer, setBuyer] = useState("");
-
-  const demoReady = products.filter((p) => listings.some((l) => l.productId === p.id && l.marketplace === "mock" && l.status === "active") && p.status !== "sold");
-  const manualReady = products.filter((p) => listings.some((l) => l.productId === p.id && (l.status === "exported" || (l.status === "active" && !ADAPTERS[l.marketplace].capabilities.threads))));
+  const demoReady = products.filter((p) => p.status !== "sold" && listings.some((l) => l.productId === p.id && l.marketplace === "mock" && l.status === "active"));
+  const manualReady = products.filter(
+    (p) => p.status !== "sold" && listings.some((l) => l.productId === p.id && l.status !== "draft" && !ADAPTERS[l.marketplace].capabilities.threads),
+  );
   const options = kind === "demo" ? demoReady : manualReady;
-
   return (
     <Modal open={open} onClose={onClose} title="New conversation">
       <Segmented
@@ -212,14 +200,14 @@ function NewConversation({ open, onClose }: { open: boolean; onClose: () => void
           { value: "manual", label: "Paste from a marketplace" },
         ]}
       />
-      {kind === "demo" ? (
-        <Note tone="brand">A scripted buyer on the simulated Demo Market. It&apos;s labeled “Demo” everywhere and never touches a real marketplace.</Note>
-      ) : (
-        <Note>For marketplaces without a messaging API (eBay, Facebook, Mercari): paste what the buyer wrote, get a policy-checked reply, and copy it back yourself.</Note>
-      )}
+      <Note tone={kind === "demo" ? "brand" : "neutral"}>
+        {kind === "demo"
+          ? "A simulated buyer on the built-in demo marketplace. Labeled “Demo” everywhere — never a real person."
+          : "For marketplaces without a messaging API (e.g. Facebook Marketplace): paste what the buyer wrote, get a reply that follows your rules, copy it back."}
+      </Note>
       <div className="mt-4 space-y-4">
         <div>
-          <Label htmlFor="nc-p">Product</Label>
+          <Label htmlFor="nc-p">Item</Label>
           <select id="nc-p" className="field" value={pid} onChange={(e) => setPid(e.target.value)}>
             <option value="">Choose…</option>
             {options.map((p) => (
@@ -230,9 +218,9 @@ function NewConversation({ open, onClose }: { open: boolean; onClose: () => void
           </select>
           {options.length === 0 && (
             <Help>
-              {kind === "demo" ? "Publish a product to Demo Market first." : "Prepare a listing for manual posting first."}{" "}
-              <Link href="/products/new" className="font-semibold text-brand">
-                Add a product
+              {kind === "demo" ? "Activate Autopilot on an item with the demo marketplace first." : "Prepare a listing for manual posting first."}{" "}
+              <Link href="/sell" className="font-semibold text-brand">
+                Sell an item
               </Link>
             </Help>
           )}
@@ -251,7 +239,7 @@ function NewConversation({ open, onClose }: { open: boolean; onClose: () => void
             </div>
             <div>
               <Label htmlFor="nc-b">Buyer name</Label>
-              <input id="nc-b" className="field" value={buyer} onChange={(e) => setBuyer(e.target.value)} placeholder="As shown on the marketplace" />
+              <input id="nc-b" className="field" value={buyer} onChange={(e) => setBuyer(e.target.value)} />
             </div>
           </>
         )}
@@ -260,9 +248,7 @@ function NewConversation({ open, onClose }: { open: boolean; onClose: () => void
         <Button
           disabled={!pid}
           onClick={() => {
-            let cid: string | null;
-            if (kind === "demo") cid = startDemoConversation(pid);
-            else cid = createManualConversation(pid, market, buyer.trim());
+            const cid = kind === "demo" ? startDemoConversation(pid) : createManualConversation(pid, market, buyer.trim());
             onClose();
             if (cid) router.replace(`/inbox?c=${cid}`);
           }}
@@ -274,13 +260,9 @@ function NewConversation({ open, onClose }: { open: boolean; onClose: () => void
   );
 }
 
-/* ================================================================== */
-
-function Thread({ c, mode }: { c: Conversation; mode: string }) {
+function Thread({ c, p }: { c: Conversation; p?: Product }) {
   const router = useRouter();
   const toast = useToast();
-  const products = useApp((s) => s.products);
-  const p = products.find((x) => x.id === c.productId);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const manual = !c.demo && !c.externalThreadId;
@@ -311,13 +293,13 @@ function Thread({ c, mode }: { c: Conversation; mode: string }) {
         <Thumb src={p?.photos[0]?.src} className="size-10 shrink-0" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold">{c.buyerRef}</p>
-          <Link href={`/products/${c.productId}`} className="block truncate text-xs text-ink-500 hover:text-brand">
+          <Link href={`/items/${c.productId}`} className="block truncate text-xs text-ink-500 hover:text-brand">
             {p?.title} · {ADAPTERS[c.marketplace].name}
           </Link>
         </div>
-        {c.demo ? <Badge tone="brand">Demo conversation</Badge> : manual ? <Badge>Manual relay</Badge> : <Badge tone="success">Live · {ADAPTERS[c.marketplace].name}</Badge>}
-        <Badge className="hidden sm:inline-flex" dot tone={mode === "autopilot" ? "brand" : "neutral"}>
-          {p?.agentEnabled === false ? "Agent off" : `${mode[0].toUpperCase()}${mode.slice(1)}`}
+        {c.demo ? <Badge tone="brand">Simulated buyer</Badge> : manual ? <Badge>Manual relay</Badge> : <Badge tone="success">Live</Badge>}
+        <Badge className="hidden sm:inline-flex" tone={p?.autopilot ? "brand" : "neutral"} dot>
+          {p?.autopilot ? "Autopilot" : "Needs your OK"}
         </Badge>
       </div>
 
@@ -328,7 +310,7 @@ function Thread({ c, mode }: { c: Conversation; mode: string }) {
         ))}
         {busy && (
           <li className="flex items-center gap-2 text-xs text-ink-500">
-            <Loader2 className="size-3.5 animate-spin" /> Agent is checking facts and your rules…
+            <Loader2 className="size-3.5 animate-spin" /> AI is checking your rules and what it knows…
           </li>
         )}
       </ol>
@@ -336,7 +318,7 @@ function Thread({ c, mode }: { c: Conversation; mode: string }) {
       {c.demo && (
         <div className="flex flex-wrap items-center gap-2 border-t border-dashed border-brand-100 bg-brand-50/50 px-4 py-2.5 text-xs sm:px-5">
           <FlaskConical className="size-3.5 text-brand" />
-          <span className="text-brand-700">Demo buyer</span>
+          <span className="text-brand-700">Simulated buyer</span>
           {next ? (
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => buyerSays(next)} className="ml-auto max-w-full">
               <span className="truncate">Send: “{next}”</span>
@@ -364,19 +346,12 @@ function Thread({ c, mode }: { c: Conversation; mode: string }) {
             className="field"
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={c.demo ? "Type as the demo buyer…" : manual ? "Paste the buyer's message…" : "Write to the buyer as yourself…"}
+            placeholder={c.demo ? "Type as the simulated buyer…" : manual ? "Paste the buyer's message…" : "Write to the buyer as yourself…"}
           />
           <Button type="submit" disabled={!text.trim() || busy} aria-label="Send">
             <Send className="size-4" />
           </Button>
         </form>
-        <p className="mt-1.5 text-[11px] text-ink-400">
-          {c.demo
-            ? "You're playing the buyer. The agent responds using your rules and verified facts."
-            : manual
-              ? "Paste buyer messages here; copy approved replies back to the marketplace."
-              : "Messages you write here are sent as you through the marketplace."}
-        </p>
       </div>
     </Card>
   );
@@ -387,19 +362,18 @@ function Bubble({ m, c, manual, onCopy }: { m: Message; c: Conversation; manual:
   const [why, setWhy] = useState(false);
   const mine = m.role !== "buyer";
   const pending = m.status === "pending_approval" && m.role === "agent";
-
   return (
     <li className={cn("animate-rise flex", mine ? "justify-end" : "justify-start")}>
       <div className={cn("max-w-[88%] sm:max-w-[75%]", pending && "w-full sm:w-[75%]")}>
-        <p className={cn("mb-1 flex items-center gap-1.5 text-[11px] font-semibold", mine ? "justify-end text-ink-500" : "text-ink-500")}>
+        <p className={cn("mb-1 flex items-center gap-1.5 text-[11px] font-semibold text-ink-500", mine && "justify-end")}>
           {m.role === "agent" ? <Bot className="size-3.5 text-brand" /> : <User className="size-3.5" />}
-          {m.role === "agent" ? "AI agent" : m.role === "seller" ? "You" : c.buyerRef}
+          {m.role === "agent" ? "Your AI seller" : m.role === "seller" ? "You" : c.buyerRef}
           <span className="font-normal text-ink-400">· {timeAgo(m.createdAt)}</span>
         </p>
         {pending ? (
           <div className="rounded-2xl border-2 border-warning/40 bg-surface p-3 shadow-sm">
             <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold text-warning">
-              <ShieldQuestion className="size-3.5" /> Waiting for your approval
+              <ShieldQuestion className="size-3.5" /> Waiting for your OK (Autopilot is off)
             </p>
             <textarea aria-label="Draft reply" className="field min-h-20 text-sm" value={draft} onChange={(e) => setDraft(e.target.value)} />
             {m.rationale && <p className="mt-2 text-xs text-ink-500">Why: {m.rationale}</p>}
@@ -408,7 +382,7 @@ function Bubble({ m, c, manual, onCopy }: { m: Message; c: Conversation; manual:
                 Discard
               </Button>
               <Button size="sm" onClick={() => approveMessage(c.id, m.id, draft.trim() || m.text).then(() => manual && onCopy())}>
-                <Send className="size-3.5" /> {manual ? "Approve & copy" : "Approve & send"}
+                <Send className="size-3.5" /> {manual ? "Approve & copy" : "Send"}
               </Button>
             </div>
           </div>
@@ -428,7 +402,7 @@ function Bubble({ m, c, manual, onCopy }: { m: Message; c: Conversation; manual:
         {!pending && m.role !== "buyer" && (
           <div className="mt-1 flex items-center justify-end gap-2 text-[11px] text-ink-400">
             {m.status === "failed" && <span className="text-error">Not delivered</span>}
-            {m.status === "sent" && <span>{c.demo ? "Sent (demo)" : manual ? "Approved — copy to marketplace" : "Sent"}</span>}
+            {m.status === "sent" && <span>{c.demo ? "Sent (demo)" : manual ? "Copy to the marketplace" : "Sent"}</span>}
             {manual && m.status === "sent" && (
               <button onClick={onCopy} className="inline-flex items-center gap-1 font-semibold text-brand">
                 <ClipboardCopy className="size-3" /> Copy
@@ -436,7 +410,7 @@ function Bubble({ m, c, manual, onCopy }: { m: Message; c: Conversation; manual:
             )}
             {m.rationale && (
               <button onClick={() => setWhy((w) => !w)} className="font-semibold text-brand">
-                {why ? "Hide reasoning" : "Why?"}
+                {why ? "Hide" : "Why?"}
               </button>
             )}
           </div>
@@ -448,83 +422,97 @@ function Bubble({ m, c, manual, onCopy }: { m: Message; c: Conversation; manual:
 }
 
 /* ================================================================== */
+/* Buyer offers                                                       */
+/* ================================================================== */
 
-function Tasks() {
-  const tasks = useApp((s) => s.tasks);
-  const products = useApp((s) => s.products);
-  const open = tasks.filter((t) => t.status === "open");
-  const done = tasks.filter((t) => t.status === "done").slice(0, 10);
+function Offers() {
+  const offers = useApp((s) => s.offers);
+  const groups: [string, Offer[]][] = [
+    ["Needs your decision", offers.filter((o) => o.status === "pending")],
+    ["Accepted — waiting for the handoff", offers.filter((o) => o.status === "accepted")],
+    ["Closed", offers.filter((o) => ["rejected", "countered", "sold"].includes(o.status)).slice(0, 10)],
+  ];
+  if (!offers.length)
+    return (
+      <Card>
+        <Empty icon={<HandCoins className="size-5" />} title="No offers yet" body="When a buyer is ready to buy or wants to meet, the AI brings the offer here for your decision." />
+      </Card>
+    );
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
-      {open.length === 0 && (
-        <Card className="lg:col-span-2">
-          <Empty icon={<ShieldQuestion className="size-5" />} title="No open checks" body="When a buyer asks something that isn't verified yet, the agent says so honestly and asks you here." />
-        </Card>
-      )}
-      {open.map((t) => (
-        <TaskCard key={t.id} taskId={t.id} title={products.find((p) => p.id === t.productId)?.title ?? "Product"} question={t.question} instruction={t.instruction} />
-      ))}
-      {done.length > 0 && (
-        <Card className="lg:col-span-2">
-          <p className="border-b border-line px-5 py-3 text-sm font-semibold">Recently verified</p>
-          <ul className="divide-y divide-line">
-            {done.map((t) => {
-              const p = products.find((x) => x.id === t.productId);
-              const f = p?.facts.find((x) => x.id === t.factId);
-              return (
-                <li key={t.id} className="px-5 py-3 text-sm">
-                  <span className="font-semibold">{t.question}</span> <span className="text-ink-500">— {f?.answer ?? "answered"}</span>
-                  <span className="block text-xs text-ink-400">{p?.title}</span>
-                </li>
-              );
-            })}
-          </ul>
-        </Card>
+    <div className="space-y-8">
+      {groups.map(([title, list]) =>
+        list.length ? (
+          <section key={title}>
+            <h2 className="mb-3 text-sm font-bold tracking-wide text-ink-500 uppercase">{title}</h2>
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
+              {list.map((o) => (
+                <OfferCard key={o.id} o={o} />
+              ))}
+            </div>
+          </section>
+        ) : null,
       )}
     </div>
   );
 }
 
-function TaskCard({ taskId, title, question, instruction }: { taskId: string; title: string; question: string; instruction: string }) {
+/* ================================================================== */
+/* Questions only the seller can answer                               */
+/* ================================================================== */
+
+function Questions() {
+  const questions = useApp((s) => s.questions);
+  const products = useApp((s) => s.products);
+  const open = questions.filter((q) => q.status === "open");
+  if (!open.length)
+    return (
+      <Card>
+        <Empty icon={<ShieldQuestion className="size-5" />} title="Nothing needs you" body="When a buyer asks something the AI can't confirm, it says so honestly and asks you here." />
+      </Card>
+    );
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-2">
+      {open.map((q) => (
+        <QuestionCard key={q.id} id={q.id} question={q.question} buyer={q.buyerQuestion} item={products.find((p) => p.id === q.productId)?.title ?? ""} />
+      ))}
+    </div>
+  );
+}
+
+function QuestionCard({ id, question, buyer, item }: { id: string; question: string; buyer: string; item: string }) {
   const toast = useToast();
   const [answer, setAnswer] = useState("");
-  const [file, setFile] = useState<File | null>(null);
   const [inListing, setInListing] = useState(true);
   const [busy, setBusy] = useState(false);
   return (
     <Card className="p-5">
-      <Badge tone="warning" dot>
-        Verification needed
-      </Badge>
-      <p className="mt-3 font-display text-lg font-bold">{question}</p>
-      <p className="mt-1 text-sm text-ink-500">{instruction}</p>
-      <p className="mt-1 text-xs text-ink-400">{title}</p>
-      <div className="mt-4 space-y-3">
-        <textarea aria-label="Your answer" className="field min-h-20" placeholder="What did you find? e.g. “Yes — tested with a laptop, the HDMI port works.”" value={answer} onChange={(e) => setAnswer(e.target.value)} />
-        <label className="flex cursor-pointer items-center gap-2 rounded-xl border border-dashed border-line px-3 py-2.5 text-sm text-ink-500 hover:border-brand">
-          <Paperclip className="size-4" />
-          <span className="truncate">{file ? file.name : "Attach a photo or short video (optional)"}</span>
-          <input type="file" accept="image/*,video/*" hidden onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-        </label>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" className="accent-brand" checked={inListing} onChange={(e) => setInListing(e.target.checked)} />
-          Suggest adding this to the listing
-        </label>
-        <Help>Evidence shows the item at the time you recorded it — the agent never presents it as a guarantee.</Help>
-      </div>
+      <p className="text-xs font-semibold text-ink-500">{item}</p>
+      <p className="mt-1 font-display text-lg font-bold">{question}</p>
+      <p className="mt-1 text-sm text-ink-500">Buyer asked: “{buyer}”</p>
+      <textarea
+        aria-label="Your answer"
+        className="field mt-4 min-h-20"
+        placeholder="Your answer — the AI replies to the buyer and remembers it"
+        value={answer}
+        onChange={(e) => setAnswer(e.target.value)}
+      />
+      <label className="mt-2 flex items-center gap-2 text-sm">
+        <input type="checkbox" className="accent-brand" checked={inListing} onChange={(e) => setInListing(e.target.checked)} />
+        Add to the listing so other buyers see it
+      </label>
       <div className="mt-4 flex justify-end gap-2">
-        <Button variant="ghost" onClick={() => dismissTask(taskId)}>
-          Dismiss
+        <Button variant="ghost" onClick={() => dismissQuestion(id)}>
+          Skip
         </Button>
         <Button
           disabled={!answer.trim() || busy}
           onClick={async () => {
             setBusy(true);
-            await submitVerification(taskId, { answer, file: file ?? undefined, inListing });
-            toast("Verified — the agent will use this from now on");
+            await answerQuestion(id, answer, inListing);
+            toast("Answered — the AI replied to the buyer");
           }}
         >
-          {busy && <Loader2 className="size-4 animate-spin" />} Save verified answer
+          {busy && <Loader2 className="size-4 animate-spin" />} Answer
         </Button>
       </div>
     </Card>

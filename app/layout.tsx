@@ -6,9 +6,8 @@ const inter = Inter({ variable: "--font-inter", subsets: ["latin", "cyrillic"] }
 const manrope = Manrope({ variable: "--font-manrope", subsets: ["latin", "cyrillic"] });
 
 export const metadata: Metadata = {
-  title: "UNLOAD Autopilot — Take a photo. Let AI sell it.",
-  description:
-    "A personal AI sales agent: it drafts honest listings, publishes to supported marketplaces, answers buyers within your rules, and brings you deals to approve.",
+  title: "UNLOAD — Take a photo. Let AI sell it.",
+  description: "Your personal AI seller handles listings, conversations, and offers — so you don't have to.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

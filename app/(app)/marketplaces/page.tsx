@@ -9,7 +9,7 @@ import { Button, Card, Help, Note, Segmented, useToast } from "@/components/ui";
 import type { MarketplaceId } from "@/lib/core/types";
 import { ADAPTERS, MARKETPLACE_ORDER } from "@/lib/marketplaces/registry";
 import type { Capabilities } from "@/lib/marketplaces/types";
-import { connectMarketplace, connectReverb, disconnectMarketplace, refreshIntegrations, useApp } from "@/lib/store";
+import { connectMarketplace, connectReverb, disconnectMarketplace, refreshIntegrations, updatePrefs, useApp } from "@/lib/store";
 
 const CAPS: [keyof Capabilities, string][] = [
   ["publish", "Publish listings"],
@@ -47,7 +47,7 @@ function Marketplaces() {
     <>
       <PageHeader
         title="Marketplaces"
-        sub="UNLOAD isn't a marketplace. It works through official APIs where they exist, and gives you export-ready drafts where they don't."
+        sub="UNLOAD isn't a marketplace. It sells through official integrations where they exist and gives you ready-to-post listings where they don't."
         action={
           <Button
             variant="secondary"
@@ -111,6 +111,9 @@ function MarketCard({ id, status }: { id: MarketplaceId; status?: { state: strin
       </div>
       <p className="mt-3 text-sm text-ink-500">{status?.detail ?? "Checking…"}</p>
       {status?.account && <p className="mt-1 text-sm">Account: <span className="font-semibold">{status.account}</span></p>}
+
+      {id === "ebay" && <EbayPrefs />}
+      {id === "olx" && <OlxPrefs />}
 
       <ul className="mt-4 grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
         {CAPS.map(([k, label]) => (
@@ -198,5 +201,28 @@ function ReverbConnect() {
         Reverb → My Profile → API &amp; Integrations → Generate New Token. Scopes: read_listings, write_listings, read_messages, write_messages, read_profile. Stored encrypted in this browser&apos;s cookie only.
       </Help>
     </form>
+  );
+}
+
+function EbayPrefs() {
+  const prefs = useApp((s) => s.prefs);
+  return (
+    <div className="mt-3 grid grid-cols-[1fr_1fr_80px] gap-2">
+      <input aria-label="US ZIP code" className="field" inputMode="numeric" placeholder="ZIP" value={prefs.usZip} onChange={(e) => updatePrefs({ usZip: e.target.value })} />
+      <input aria-label="City" className="field" placeholder="City" value={prefs.usCity} onChange={(e) => updatePrefs({ usCity: e.target.value })} />
+      <input aria-label="State" className="field" maxLength={2} placeholder="CA" value={prefs.usState} onChange={(e) => updatePrefs({ usState: e.target.value.toUpperCase() })} />
+      <p className="col-span-3 text-xs text-ink-400">Item location eBay shows to buyers.</p>
+    </div>
+  );
+}
+
+function OlxPrefs() {
+  const prefs = useApp((s) => s.prefs);
+  return (
+    <div className="mt-3 grid grid-cols-2 gap-2">
+      <input aria-label="OLX city" className="field" placeholder="City, e.g. Алматы" value={prefs.olxCity} onChange={(e) => updatePrefs({ olxCity: e.target.value })} />
+      <input aria-label="Contact name" className="field" placeholder="Contact name" value={prefs.contactName} onChange={(e) => updatePrefs({ contactName: e.target.value })} />
+      <p className="col-span-2 text-xs text-ink-400">Optional Kazakhstan integration. City must match OLX&apos;s city list.</p>
+    </div>
   );
 }

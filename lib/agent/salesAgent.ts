@@ -1,25 +1,20 @@
-import type {
-  AutopilotSettings,
-  Conversation,
-  DealKind,
-  Product,
-  ReplyCategory,
-} from "../core/types";
+import type { Conversation, OfferKind, Product } from "../core/types";
 import { answerFromRecord, findFact, questionForTopic, topicsFor } from "../knowledge/kb";
 import { evaluateOffer, money, parseOffer } from "../negotiation/policy";
 
 /**
- * AI Sales Agent — decision layer.
- * Deterministic and policy-bound: it decides WHAT may be said. When Claude is
- * enabled, /api/ai/reply may rephrase the text, and the result is checked again
- * by the policy guard before it can be sent.
+ * AI Sales Agent — decision layer (deterministic).
+ * Decides WHAT may be said from verified facts, the seller's logistics and the
+ * negotiation policy. When Claude is available it may reword the reply; the
+ * result is re-checked by the price guard before sending.
  */
 
 export type Intent =
   | "off_platform"
   | "payment"
+  | "agree"
   | "purchase"
-  | "inspection"
+  | "meeting"
   | "offer"
   | "price_question"
   | "availability"
@@ -29,16 +24,17 @@ export type Intent =
 
 export type AgentDecision = {
   intent: Intent;
-  category: ReplyCategory | "escalation" | "deal";
   reply: string;
   rationale: string;
-  /** price amounts this reply is allowed to mention */
+  /** amounts this reply may mention */
   allowedAmounts: number[];
-  /** create a verification task for the seller */
-  task?: { topic: string; question: string; instruction: string };
-  /** create a structured deal request */
-  deal?: { kind: DealKind; offeredPrice: number | null; conditions: string };
-  /** notify the owner without a deal/task */
+  /** a new counteroffer the agent is making */
+  counter?: number;
+  /** buyer is ready → offer for the seller to accept/reject/counter */
+  offer?: { kind: OfferKind; price: number | null; when: string };
+  /** needs the seller's knowledge */
+  question?: { topic: string; question: string };
+  /** notify the seller (payment, off-platform, repeated lowballs) */
   escalate?: string;
   lowOffer?: boolean;
 };
@@ -50,207 +46,137 @@ export function classify(text: string): Intent[] {
   const out: Intent[] = [];
   if (has(/whats\s?app|telegram|\bviber\b|my (phone|number|email)|text me|call me|e-?mail me|\+?\d[\d\s-]{8,}\d/, t)) out.push("off_platform");
   if (has(/\bpay(ment|pal)?\b|venmo|zelle|cash app|wire|transfer|prepay|deposit|credit card/, t)) out.push("payment");
-  if (has(/i('| wi)ll take it|i want (to buy )?it|ready to (buy|pay)|i('| a)m buying|let'?s do (it|the deal)|deal\b|i'?ll buy/, t)) out.push("purchase");
-  if (has(/see it|look at it|check it (out|in person)|inspect|test it|try it|come (by|over|see)|in person|viewing/, t)) out.push("inspection");
-  const offer = parseOffer(t);
-  if (offer != null && has(/\$|₸|tenge|тг|would you|will you|take|accept|offer|how about|can you do|for \d|\bdo \d|lowest|ok with|\d+\s*\?/, t))
-    out.push("offer");
+  if (has(/\b(deal|sounds good|sounds fair|works for me|that works|agreed|it'?s a deal|ok(ay)?,? (let'?s|i'?ll)|you got a deal)\b/, t)) out.push("agree");
+  if (has(/i('| wi)ll take it|i want (to buy )?it|ready to (buy|pay)|i('| a)m buying|i'?ll buy/, t)) out.push("purchase");
+  if (has(/see it|look at it|check it (out|in person)|inspect|test it|try it|come (by|over|see)|in person|pick (it )?up (it )?(today|tomorrow|tonight|this)/, t)) out.push("meeting");
+  if (parseOffer(text) != null) out.push("offer");
   if (!out.includes("offer") && has(/lowest|best price|negotiable|discount|final price|firm|cheaper|any flexibility|go down/, t)) out.push("price_question");
   if (has(/still (available|for sale|have it)|is (it|this) (available|sold)|available\??$|sold yet/, t)) out.push("availability");
-  if (has(/pick ?up|ship(ping)?|deliver(y)?|where (are you|is it|can we)|location|meet|courier|post/, t)) out.push("logistics");
+  if (has(/pick ?up|ship(ping)?|deliver(y)?|where (are you|is it|can we)|location|meet\b|courier/, t)) out.push("logistics");
   if (out.length === 0) out.push(has(/\?|does|is there|any |how |what |which |can /, t) ? "question" : "smalltalk");
   return out;
 }
 
-const PRIORITY: Intent[] = [
-  "off_platform",
-  "payment",
-  "purchase",
-  "inspection",
-  "offer",
-  "price_question",
-  "question",
-  "availability",
-  "logistics",
-  "smalltalk",
-];
-
-function shortName(p: Product) {
-  return p.title.split(/ [—–-] /)[0];
+/** Buyer's proposed timing in their own words ("tomorrow", "Saturday at 3pm"). */
+export function extractWhen(text: string): string {
+  const m = text.match(
+    /\b(today|tonight|tomorrow(?: (?:morning|afternoon|evening|night))?|this (?:weekend|evening|afternoon|morning)|(?:on )?(?:mon|tues|wednes|thurs|fri|satur|sun)day(?: (?:morning|afternoon|evening))?)(?:\s+(?:at|around|after|before)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?/i,
+  );
+  return m ? m[0].trim() : "";
 }
 
-function logisticsLine(s: AutopilotSettings) {
-  const opts = [s.pickup && `local pickup${s.meetingArea ? ` (${s.meetingArea})` : ""}`, s.shipping && "shipping"].filter(Boolean);
+const PRIORITY: Intent[] = ["off_platform", "payment", "agree", "purchase", "meeting", "offer", "price_question", "question", "availability", "logistics", "smalltalk"];
+
+export function shortName(p: Pick<Product, "title">) {
+  return p.title.split(/ [—–-] |,| with | for /i)[0];
+}
+
+function logisticsLine(p: Product) {
+  const l = p.logistics;
+  const opts = [l.pickup && `local pickup${l.area ? ` (${l.area})` : ""}`, l.shipping && "shipping"].filter(Boolean);
   return opts.length ? `The seller offers ${opts.join(" or ")}.` : "The seller will confirm pickup or delivery details.";
 }
 
-export function decide(product: Product, convo: Conversation, buyerText: string, settings: AutopilotSettings): AgentDecision {
+export function decide(product: Product, convo: Conversation, buyerText: string): AgentDecision {
   const intents = classify(buyerText);
   const intent = PRIORITY.find((i) => intents.includes(i))!;
   const rules = product.pricing;
   const fmt = (n: number | null) => money(n, rules.currency);
   const name = shortName(product);
+  const when = extractWhen(buyerText);
+  const said = parseOffer(buyerText);
+
+  // Agreement / purchase / meeting with an explicit price below the range is really a counter-offer.
+  if ((intent === "agree" || intent === "purchase" || intent === "meeting") && said != null) {
+    const e = evaluateOffer(said, rules, product.goal, convo.lastCounter);
+    if (e.action === "counter") return offerDecision(product, convo, said, intents);
+  }
 
   switch (intent) {
     case "off_platform":
       return {
         intent,
-        category: "escalation",
         reply: "Let's keep the conversation here on the platform for now — it keeps things safe for both of us. The seller will follow up.",
         rationale: "Buyer asked to move off-platform. Escalated to the seller.",
         allowedAmounts: [],
-        escalate: settings.escalation.offPlatformContact ? "Buyer asked to continue off-platform" : undefined,
+        escalate: "A buyer asked to continue off-platform",
       };
 
     case "payment":
       return {
         intent,
-        category: "escalation",
-        reply: "Payment details are confirmed by the seller directly once you agree on the deal. I've passed your question along.",
+        reply: "The seller confirms payment details directly once you agree on the deal. I've passed your question along.",
         rationale: "Payment questions are never answered by the agent.",
         allowedAmounts: [],
-        escalate: settings.escalation.paymentQuestions ? "Buyer asked about payment" : undefined,
+        escalate: "A buyer asked about payment",
       };
 
+    case "agree":
     case "purchase":
-    case "inspection": {
-      const offer = parseOffer(buyerText);
-      const kind: DealKind = intent === "purchase" ? "purchase" : "inspection";
+    case "meeting": {
+      const price = said ?? convo.lastCounter ?? rules.desired;
+      const kind = intent === "meeting" && !intents.includes("agree") && !intents.includes("purchase") ? "meeting" : "purchase";
       return {
         intent,
-        category: "deal",
         reply:
-          kind === "purchase"
-            ? `Great — I've let the seller know you'd like to buy the ${name}. They'll confirm and arrange the details with you shortly. ${logisticsLine(settings)}`
-            : `Sure — I've asked the seller about a time for you to see the ${name}. ${logisticsLine(settings)}`,
-        rationale: `Buyer shows ${kind} intent → Deal Request created for the seller's approval. Nothing is finalized by the agent.`,
-        allowedAmounts: offer ? [offer] : [],
-        deal: {
-          kind,
-          offeredPrice: offer ?? rules.desired,
-          conditions: [settings.pickup && "pickup", settings.shipping && "shipping", settings.meetingArea].filter(Boolean).join(" · "),
-        },
+          kind === "meeting"
+            ? `Sure — I've asked the seller about a time for you to see the ${name}${when ? ` ${when}` : ""}. ${logisticsLine(product)}`
+            : `Great! I've sent ${price != null ? `your offer of ${fmt(price)}` : "your request"}${when ? ` and ${when}` : ""} to the seller to confirm. I'll get back to you shortly.`,
+        rationale: `Buyer is ready (${kind}). Only the seller can accept, so it went to Buyer Offers.`,
+        allowedAmounts: price != null ? [price] : [],
+        offer: { kind, price, when },
       };
     }
 
-    case "offer": {
-      const offer = parseOffer(buyerText)!;
-      const d = evaluateOffer(offer, rules);
-      const low = convo.lowOfferCount + (d.action === "counter" || d.action === "hold" ? 1 : 0);
-      if (d.action === "no_rules")
-        return {
-          intent,
-          category: "escalation",
-          reply: "Thanks for the offer — I'll pass it to the seller, who hasn't set a price yet.",
-          rationale: d.reason,
-          allowedAmounts: [offer],
-          escalate: "Offer received but no asking price is set",
-        };
-      if (d.action === "forward")
-        return {
-          intent,
-          category: "deal",
-          reply: `Thanks! I'll pass your offer of ${fmt(offer)} to the seller to confirm.`,
-          rationale: `${d.reason} Only the seller can accept, so a Deal Request was created.`,
-          allowedAmounts: [offer],
-          deal: { kind: "offer", offeredPrice: offer, conditions: "" },
-        };
-      if (d.action === "counter")
-        return {
-          intent,
-          category: "pricing",
-          reply: `The seller is asking ${fmt(rules.desired)}. I can offer ${fmt(d.counter)} if that works for you.`,
-          rationale: `${d.reason} (Seller enabled negotiation.)`,
-          allowedAmounts: [d.counter, offer],
-          lowOffer: true,
-          escalate: settings.escalation.repeatedLowOffers && low >= 3 ? "Buyer keeps offering below the approved range" : undefined,
-        };
-      return {
-        intent,
-        category: "pricing",
-        reply: `Thanks for the offer. The asking price is ${fmt(rules.desired)}; I'll let the seller know you're interested.`,
-        rationale: d.reason,
-        allowedAmounts: [offer],
-        lowOffer: true,
-        escalate: settings.escalation.repeatedLowOffers && low >= 3 ? "Buyer keeps offering below the asking price" : undefined,
-      };
-    }
+    case "offer":
+      return offerDecision(product, convo, said!, intents);
 
     case "price_question":
       return {
         intent,
-        category: "pricing",
         reply:
           rules.desired == null
             ? "The seller hasn't set a price yet — I'll ask them."
-            : rules.negotiationEnabled
-              ? `The asking price is ${fmt(rules.desired)}. The seller is open to reasonable offers — what did you have in mind?`
-              : `The asking price is ${fmt(rules.desired)}.`,
-        rationale: "Restated the public asking price only. The private minimum is never shared.",
-        allowedAmounts: [],
+            : `The asking price is ${fmt(convo.lastCounter ?? rules.desired)}. What did you have in mind?`,
+        rationale: "Restated the public price (or the counteroffer already made). The private minimum is never shared.",
+        allowedAmounts: convo.lastCounter ? [convo.lastCounter] : [],
       };
 
     case "availability":
       return {
         intent,
-        category: "availability",
-        reply: product.status === "sold" ? `Sorry, the ${name} has been sold.` : `Yes, the ${name} is still available. ${logisticsLine(settings)}`,
+        reply: product.status === "sold" ? `Sorry, the ${name} has been sold.` : `Yes, the ${name} is still available. ${logisticsLine(product)}`,
         rationale: "Availability comes from the listing status.",
         allowedAmounts: [],
       };
 
     case "logistics":
-      return {
-        intent,
-        category: "logistics",
-        reply: logisticsLine(settings),
-        rationale: "Only the delivery options the seller enabled in Autopilot Settings.",
-        allowedAmounts: [],
-      };
+      return { intent, reply: logisticsLine(product), rationale: "Only the options the seller enabled.", allowedAmounts: [] };
 
     case "question": {
       const fact = findFact(product, buyerText);
-      if (fact) {
-        const ev = fact.evidenceIds.length
-          ? " The seller also recorded a short check — it shows how it worked at the time, but can't guarantee future condition."
-          : "";
+      if (fact)
         return {
           intent,
-          category: "condition",
-          reply: `${fact.answer}${/[.!?]$/.test(fact.answer) ? "" : "."} (Confirmed by the seller.)${ev}`,
-          rationale: `Answered from the verified knowledge base: “${fact.question}”.`,
+          reply: `${fact.answer}${/[.!?]$/.test(fact.answer) ? "" : "."} (Confirmed by the seller.)`,
+          rationale: `Answered from verified info: “${fact.question}”.`,
           allowedAmounts: [],
         };
-      }
       const rec = answerFromRecord(product, buyerText);
-      if (rec)
-        return {
-          intent,
-          category: "condition",
-          reply: rec,
-          rationale: "Answered from the seller-reviewed product details.",
-          allowedAmounts: [],
-        };
+      if (rec) return { intent, reply: rec, rationale: "Answered from the seller-approved listing details.", allowedAmounts: [] };
       const topic = topicsFor(buyerText)[0] ?? buyerText.toLowerCase().replace(/[^a-z0-9 ]/g, "").slice(0, 40);
-      const question = topicsFor(buyerText)[0] ? questionForTopic(topic, buyerText) : buyerText.trim();
       return {
         intent,
-        category: "escalation",
-        reply: "That hasn't been verified yet. I'll ask the seller to check and get back to you.",
-        rationale: "Not in the verified knowledge base → verification task for the seller. The agent never guesses.",
+        reply: "Good question — I don't want to guess. I'll check with the seller and get back to you.",
+        rationale: "Not in the verified info → question sent to the seller. The agent never guesses.",
         allowedAmounts: [],
-        task: {
-          topic,
-          question,
-          instruction: `A buyer asked: “${buyerText.trim()}”. Please check and answer — optionally attach a photo or short video.`,
-        },
+        question: { topic, question: topicsFor(buyerText)[0] ? questionForTopic(topic, buyerText) : buyerText.trim() },
       };
     }
 
     default:
       return {
         intent: "smalltalk",
-        category: "availability",
         reply: `Hi! Thanks for your interest in the ${name}. Any questions I can help with?`,
         rationale: "Friendly acknowledgment, no commitments.",
         allowedAmounts: [],
@@ -258,13 +184,42 @@ export function decide(product: Product, convo: Conversation, buyerText: string,
   }
 }
 
-/** Whether the seller must approve this reply before it is sent. */
-export function needsApproval(d: AgentDecision, s: AutopilotSettings, negotiationEnabled: boolean): boolean {
-  if (s.mode === "manual") return true;
-  if (d.category === "escalation" || d.category === "deal") return false; // holding replies commit to nothing
-  if (d.category === "pricing") {
-    if (s.mode === "assisted") return d.intent === "offer"; // negotiation always reviewed in assisted
-    return !s.allowedReplies.pricing || (d.intent === "offer" && !negotiationEnabled);
-  }
-  return !s.allowedReplies[d.category];
+function offerDecision(product: Product, convo: Conversation, offer: number, intents: Intent[]): AgentDecision {
+  const rules = product.pricing;
+  const fmt = (n: number | null) => money(n, rules.currency);
+  const e = evaluateOffer(offer, rules, product.goal, convo.lastCounter);
+  const when = "";
+  if (e.action === "no_price")
+    return {
+      intent: "offer",
+      reply: "Thanks for the offer — I'll pass it to the seller.",
+      rationale: e.reason,
+      allowedAmounts: [offer],
+      escalate: "Offer received but no asking price is set",
+    };
+  if (e.action === "accept_for_review")
+    return {
+      intent: "offer",
+      reply: `Thanks! ${fmt(offer)} works for me to pass along — I've sent it to the seller to confirm.`,
+      rationale: e.reason,
+      allowedAmounts: [offer],
+      offer: { kind: intents.includes("meeting") ? "meeting" : "offer", price: offer, when },
+    };
+  const repeated = convo.lastCounter != null;
+  return {
+    intent: "offer",
+    reply: repeated
+      ? `I understand. The best I can do is ${fmt(e.counter)}.`
+      : `The seller is asking ${fmt(rules.desired)}. I can offer ${fmt(e.counter)} if that works for you.`,
+    rationale: e.reason,
+    allowedAmounts: [e.counter, offer],
+    counter: e.counter,
+    lowOffer: true,
+    escalate: convo.lowOfferCount + 1 >= 3 ? "A buyer keeps offering below your range" : undefined,
+  };
+}
+
+/** Autopilot on → the agent sends; off → the seller approves each reply. */
+export function needsApproval(autopilot: boolean) {
+  return !autopilot;
 }
