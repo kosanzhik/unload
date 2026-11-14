@@ -82,6 +82,8 @@ async function call<T>(s: Pick<Session, "token" | "env">, method: string, path: 
   if (!r.ok) {
     const errs = j.errors && typeof j.errors === "object" ? Object.entries(j.errors).map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}`) : [];
     const msg = errs.join("; ") || j.message || (r.status === 401 ? "Reverb rejected the token." : `Reverb API error (HTTP ${r.status})`);
+    // Safe diagnostics: env, method, path and Reverb's message — never the token.
+    console.warn(`[reverb] ${s.env} ${method} ${path.split("?")[0]} → ${r.status}: ${String(msg).slice(0, 200)}`);
     throw new ReverbError(msg, r.status);
   }
   return j as T;
@@ -89,8 +91,14 @@ async function call<T>(s: Pick<Session, "token" | "env">, method: string, path: 
 
 /** Validate a pasted token and remember it. */
 export async function connectToken(token: string, env: ReverbEnv) {
-  const s = { token: token.trim(), env };
-  await call(s, "GET", "/my/listings?state=all&per_page=1");
+  const s = { token: token.trim().replace(/^Bearer\s+/i, ""), env };
+  // Validate with the account endpoint; fall back to listings for tokens without read_profile.
+  try {
+    await call(s, "GET", "/my/account");
+  } catch (e) {
+    if (e instanceof ReverbError && e.status === 401) throw new ReverbError(`Reverb ${env === "sandbox" ? "Sandbox" : "production"} rejected this token. Check that it was created on ${env === "sandbox" ? "sandbox.reverb.com" : "reverb.com"}.`, 401);
+    await call(s, "GET", "/my/listings?state=all");
+  }
   const shop = await call<{ name?: string }>(s, "GET", "/shop").catch(() => null);
   await writeSession({ ...s, account: shop?.name });
   return shop?.name ?? null;
