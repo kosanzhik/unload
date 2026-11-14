@@ -19,7 +19,7 @@ import type {
 import { putFile } from "./evidence";
 import { knowledgeSheet } from "./knowledge/kb";
 import { listingDescription, listingTitle } from "./listing/drafts";
-import { ADAPTERS, draftListing, ebayContext, mockAdapter, olxContext } from "./marketplaces/registry";
+import { ADAPTERS, connectReverbToken, draftListing, ebayContext, mockAdapter, olxContext } from "./marketplaces/registry";
 import type { IntegrationStatus } from "./marketplaces/types";
 import { guardReply, money, parseOffer } from "./negotiation/policy";
 import { uid } from "./util";
@@ -210,6 +210,12 @@ export async function connectMarketplace(id: MarketplaceId) {
   await ADAPTERS[id].connect();
   await refreshIntegrations();
 }
+export async function connectReverb(token: string, env: "production" | "sandbox") {
+  const r = await connectReverbToken(token, env);
+  await refreshIntegrations();
+  return r;
+}
+
 export async function disconnectMarketplace(id: MarketplaceId) {
   await ADAPTERS[id].disconnect();
   await refreshIntegrations();
@@ -365,11 +371,11 @@ export async function refreshListing(id: string) {
   }
 }
 
-export async function setListingAvailability(id: string, active: boolean) {
+export async function setListingAvailability(id: string, active: boolean, soldHere?: boolean) {
   const l = getState().listings.find((x) => x.id === id);
   if (!l) return;
   try {
-    const status = await ADAPTERS[l.marketplace].setAvailability(l, active);
+    const status = await ADAPTERS[l.marketplace].setAvailability(l, active, soldHere);
     patchListing(id, { status });
   } catch (e) {
     patchListing(id, { note: e instanceof Error ? e.message : "Couldn't change availability" });
@@ -612,7 +618,7 @@ export async function completeDeal(dealId: string, finalPrice: number | null) {
   }));
   patchProduct(d.productId, () => ({ status: "sold" }));
   for (const l of getState().listings.filter((x) => x.productId === d.productId && x.status !== "draft")) {
-    await setListingAvailability(l.id, false);
+    await setListingAvailability(l.id, false, l.marketplace === d.marketplace);
     if (!getState().listings.find((x) => x.id === l.id)?.note?.startsWith("Couldn't")) patchListing(l.id, { status: "sold" });
   }
 }

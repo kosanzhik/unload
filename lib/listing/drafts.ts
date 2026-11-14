@@ -10,6 +10,7 @@ const LIMITS: Record<MarketplaceId, { title: number; description: number }> = {
   mock: { title: 80, description: 5000 },
   olx: { title: 70, description: 9000 },
   ebay: { title: 80, description: 4000 },
+  reverb: { title: 120, description: 5000 },
   facebook: { title: 100, description: 5000 },
   mercari: { title: 80, description: 1000 },
 };

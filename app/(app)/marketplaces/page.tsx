@@ -5,11 +5,11 @@ import { Suspense, useState } from "react";
 import { Check, ExternalLink, Loader2, Minus, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/chrome";
 import { MarketplaceBadge } from "@/components/status";
-import { Button, Card, Note, useToast } from "@/components/ui";
+import { Button, Card, Help, Note, Segmented, useToast } from "@/components/ui";
 import type { MarketplaceId } from "@/lib/core/types";
 import { ADAPTERS, MARKETPLACE_ORDER } from "@/lib/marketplaces/registry";
 import type { Capabilities } from "@/lib/marketplaces/types";
-import { connectMarketplace, disconnectMarketplace, refreshIntegrations, useApp } from "@/lib/store";
+import { connectMarketplace, connectReverb, disconnectMarketplace, refreshIntegrations, useApp } from "@/lib/store";
 
 const CAPS: [keyof Capabilities, string][] = [
   ["publish", "Publish listings"],
@@ -131,7 +131,8 @@ function MarketCard({ id, status }: { id: MarketplaceId; status?: { state: strin
             Disconnect
           </Button>
         )}
-        {state === "requires_authorization" && (
+        {state === "requires_authorization" && id === "reverb" && <ReverbConnect />}
+        {state === "requires_authorization" && id !== "reverb" && (
           <Button size="sm" disabled={busy} onClick={() => run(() => connectMarketplace(id), `${a.name} connected`)}>
             {busy && <Loader2 className="size-4 animate-spin" />} {id === "mock" ? "Connect" : `Sign in with ${a.name}`}
           </Button>
@@ -143,5 +144,59 @@ function MarketCard({ id, status }: { id: MarketplaceId; status?: { state: strin
         )}
       </div>
     </Card>
+  );
+}
+
+function ReverbConnect() {
+  const toast = useToast();
+  const [token, setToken] = useState("");
+  const [env, setEnv] = useState<"production" | "sandbox">("production");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <form
+      className="w-full space-y-2"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setBusy(true);
+        setError("");
+        try {
+          const r = await connectReverb(token, env);
+          setToken("");
+          toast(`Reverb connected${r.account ? ` · ${r.account}` : ""}`);
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Couldn't connect");
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <Segmented
+        value={env}
+        onChange={setEnv}
+        options={[
+          { value: "production", label: "reverb.com" },
+          { value: "sandbox", label: "Sandbox" },
+        ]}
+      />
+      <div className="flex gap-2">
+        <input
+          aria-label="Reverb personal access token"
+          type="password"
+          autoComplete="off"
+          className="field"
+          placeholder="Personal Access Token"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+        />
+        <Button size="sm" type="submit" className="h-10" disabled={busy || token.trim().length < 20}>
+          {busy && <Loader2 className="size-4 animate-spin" />} Connect
+        </Button>
+      </div>
+      {error && <p className="text-xs font-medium text-error">{error}</p>}
+      <Help>
+        Reverb → My Profile → API &amp; Integrations → Generate New Token. Scopes: read_listings, write_listings, read_messages, write_messages, read_profile. Stored encrypted in this browser&apos;s cookie only.
+      </Help>
+    </form>
   );
 }

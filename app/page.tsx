@@ -247,7 +247,8 @@ function Proof() {
 function Markets() {
   const rows = [
     ["OLX Kazakhstan", "Official OAuth + Partner API: publish, status, messages", "Connected once API access is approved"],
-    ["eBay", "Export-ready drafts with item specifics", "Manual export"],
+    ["eBay", "Official Sell APIs: publish, status, end listing", "Connected once you sign in with eBay"],
+    ["Reverb", "Official API with your personal token: publish, status, messages", "Connect in one step"],
     ["Facebook Marketplace", "No public listing API for individuals", "Manual export"],
     ["Mercari", "No public listing API for individual sellers", "Manual export"],
   ];

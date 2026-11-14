@@ -39,7 +39,8 @@ export interface MarketplaceAdapter {
   publish(listing: Listing, product: Product): Promise<PublishResult>;
   readStatus(listing: Listing): Promise<Partial<Pick<Listing, "status" | "url" | "views">>>;
   update(listing: Listing, product: Product): Promise<void>;
-  setAvailability(listing: Listing, active: boolean): Promise<ListingStatus>;
+  /** soldHere: the buyer came from this marketplace (some platforms bill fees differently) */
+  setAvailability(listing: Listing, active: boolean, soldHere?: boolean): Promise<ListingStatus>;
   listThreads(): Promise<ExternalThread[]>;
   listMessages(threadId: string): Promise<ExternalMessage[]>;
   sendMessage(threadId: string, text: string): Promise<{ id?: string }>;

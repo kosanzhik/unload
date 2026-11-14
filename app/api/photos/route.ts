@@ -1,18 +1,19 @@
 import { put } from "@vercel/blob";
 import { readTokens as olxTokens } from "@/lib/server/olx";
 import { readTokens as ebayTokens } from "@/lib/server/ebay";
+import { readSession as reverbSession } from "@/lib/server/reverb";
 
 const MAX = 5 * 1024 * 1024;
 
 /**
  * Hosts a listing photo publicly so a marketplace can fetch it.
- * Called only when the seller publishes to a connected marketplace — photos
+ * Called only when the seller publishes to a connected marketplace (OLX, eBay, Reverb) — photos
  * are never uploaded before that, and only connected sellers may upload.
  */
 export async function POST(req: Request) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return Response.json({ error: "Photo hosting isn't configured." }, { status: 501 });
-  const [o, e] = await Promise.all([olxTokens(), ebayTokens()]);
-  if (!o && !e) return Response.json({ error: "Connect a marketplace before publishing photos." }, { status: 401 });
+  const [o, e, r] = await Promise.all([olxTokens(), ebayTokens(), reverbSession().catch(() => null)]);
+  if (!o && !e && !r) return Response.json({ error: "Connect a marketplace before publishing photos." }, { status: 401 });
 
   const { dataUrl, name } = (await req.json()) as { dataUrl?: string; name?: string };
   const m = dataUrl?.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);

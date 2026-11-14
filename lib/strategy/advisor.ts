@@ -42,6 +42,17 @@ export function adviseProduct(
             : "OLX Kazakhstan matches your currency. Until its API access is connected, export the draft and post it manually.",
         action: { label: integrations.olx === "connected" ? "Publish" : "Open marketplaces", href: integrations.olx === "connected" ? href : "/marketplaces" },
       });
+    else if (p.category === "Audio" || /headphone|synth|keyboard|guitar|amp|speaker|microphone|mixer|pedal|interface/i.test(p.title))
+      out.push({
+        id: "mk-reverb",
+        kind: "heuristic",
+        title: "Reverb fits music & audio gear",
+        body:
+          integrations.reverb === "connected"
+            ? "Reverb is connected: the agent can publish there and read buyer messages. It needs the brand and model."
+            : "Reverb specializes in music and audio gear and lets you connect with a personal token — no approval wait.",
+        action: { label: integrations.reverb === "connected" ? "Publish" : "Connect Reverb", href: integrations.reverb === "connected" ? href : "/marketplaces" },
+      });
     else
       out.push({
         id: "mk-usd",

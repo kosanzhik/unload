@@ -338,6 +338,107 @@ export const ebayAdapter: MarketplaceAdapter = {
     return "sold";
   },
 };
+/* ------------------------------------------------------------------ */
+/* Reverb — official API with the seller's Personal Access Token       */
+/* ------------------------------------------------------------------ */
+
+const REVERB_STATE: Record<string, ListingStatus> = { live: "active", draft: "draft", ended: "inactive", sold_out: "sold", suspended: "error" };
+
+export const reverbAdapter: MarketplaceAdapter = {
+  id: "reverb",
+  name: "Reverb",
+  market: "reverb.com · music & audio gear · USD",
+  defaultCurrency: "USD",
+  titleMax: 120,
+  capabilities: ALL,
+  docs: "https://www.reverb-api.com/docs",
+  async status(): Promise<IntegrationStatus> {
+    const s = await api<{ connected: boolean; env: string | null; account: string | null }>("/api/reverb/status");
+    if (!s.connected)
+      return { state: "requires_authorization", detail: "Paste a Personal Access Token from your Reverb profile (API & Integrations). Reverb is for music and audio gear only." };
+    return {
+      state: "connected",
+      detail: `Connected with your Reverb token${s.env === "sandbox" ? " (Sandbox — test listings only)" : ""}. Publishing, status and buyer messages go through Reverb's official API.`,
+      account: s.account ?? undefined,
+    };
+  },
+  async connect() {
+    throw new Error("Use the token form on the Marketplaces page.");
+  },
+  async disconnect() {
+    await api("/api/reverb/disconnect", { method: "POST" });
+  },
+  async publish(listing: Listing, product: Product) {
+    if (listing.currency !== "USD") throw new Error("Reverb listings here are priced in USD. Switch the currency in pricing rules.");
+    if (listing.price == null) throw new Error("Set an asking price first.");
+    const photos = product.photos
+      .map((p) => (p.src.startsWith("/") ? `${window.location.origin}${p.src}` : p.src))
+      .filter((u) => /^https:\/\//.test(u));
+    const r = await api<{ id: string; state: string | null; url: string | null; category: string }>("/api/reverb/listings", {
+      method: "POST",
+      json: {
+        sku: listing.id,
+        title: listing.title,
+        description: listing.description,
+        make: product.brand,
+        model: product.model,
+        condition: product.condition,
+        price: listing.price,
+        offersEnabled: product.pricing.negotiationEnabled,
+        photos,
+        categoryQuery: `${product.category} ${product.title}`,
+      },
+    });
+    return {
+      externalId: r.id,
+      url: r.url ?? undefined,
+      status: (r.state && REVERB_STATE[r.state]) || "moderation",
+      note: `Category: ${r.category}.${r.state === "draft" ? " Reverb saved it as a draft — check missing fields in your Reverb shop." : ""}`,
+    };
+  },
+  async readStatus(l) {
+    if (!l.externalId) return {};
+    const r = await api<{ state: string | null; url: string | null; views: number | null }>(`/api/reverb/listings/${l.externalId}`);
+    return { status: (r.state && REVERB_STATE[r.state]) || l.status, url: r.url ?? l.url, ...(r.views != null ? { views: r.views } : {}) };
+  },
+  async update(l) {
+    if (!l.externalId) return;
+    await api(`/api/reverb/listings/${l.externalId}`, { method: "PUT", json: { title: l.title, description: l.description, price: l.price } });
+  },
+  async setAvailability(l, active, soldHere) {
+    if (!l.externalId) return l.status;
+    if (active) {
+      await api(`/api/reverb/listings/${l.externalId}`, { method: "PUT", json: { publish: true } });
+      return "active";
+    }
+    await api(`/api/reverb/listings/${l.externalId}/end`, { method: "POST", json: { soldOnReverb: Boolean(soldHere) } });
+    return soldHere ? "sold" : "inactive";
+  },
+  async listThreads(): Promise<ExternalThread[]> {
+    const t = await api<{ id: string; listingId: string | null; buyer: string; unread: boolean; updatedAt: string | null }[]>("/api/reverb/conversations");
+    return t.map((x) => ({
+      id: x.id,
+      advertId: x.listingId ?? undefined,
+      buyerRef: x.buyer,
+      unread: x.unread ? 1 : 0,
+      updatedAt: x.updatedAt ? Date.parse(x.updatedAt) : Date.now(),
+    }));
+  },
+  async listMessages(threadId): Promise<ExternalMessage[]> {
+    const m = await api<{ id: string; text: string; createdAt: string | null; fromBuyer: boolean }[]>(`/api/reverb/conversations/${threadId}`);
+    return m.map((x) => ({ id: x.id, text: x.text, fromBuyer: x.fromBuyer, createdAt: x.createdAt ? Date.parse(x.createdAt) : Date.now() }));
+  },
+  async sendMessage(threadId, text) {
+    await api(`/api/reverb/conversations/${threadId}`, { method: "POST", json: { text } });
+    return {};
+  },
+};
+
+/** Token-based connection (Reverb personal access tokens). */
+export async function connectReverbToken(token: string, env: "production" | "sandbox") {
+  return api<{ ok: boolean; account: string | null }>("/api/reverb/connect", { method: "POST", json: { token, env } });
+}
+
 export const facebookAdapter = manual(
   "facebook",
   "Facebook Marketplace",
@@ -359,10 +460,11 @@ export const ADAPTERS: Record<MarketplaceId, MarketplaceAdapter> = {
   mock: mockAdapter,
   olx: olxAdapter,
   ebay: ebayAdapter,
+  reverb: reverbAdapter,
   facebook: facebookAdapter,
   mercari: mercariAdapter,
 };
-export const MARKETPLACE_ORDER: MarketplaceId[] = ["olx", "ebay", "facebook", "mercari", "mock"];
+export const MARKETPLACE_ORDER: MarketplaceId[] = ["olx", "ebay", "reverb", "facebook", "mercari", "mock"];
 
 export function draftListing(product: Product, m: MarketplaceId): Listing {
   return {

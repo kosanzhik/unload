@@ -136,7 +136,7 @@ export type Product = {
 
 /* ---------- Marketplaces ---------- */
 
-export type MarketplaceId = "mock" | "olx" | "ebay" | "facebook" | "mercari";
+export type MarketplaceId = "mock" | "olx" | "ebay" | "reverb" | "facebook" | "mercari";
 
 export type IntegrationState = "connected" | "requires_authorization" | "manual_export" | "unavailable";
 

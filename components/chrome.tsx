@@ -172,18 +172,19 @@ function Bellbox() {
 
 /** Boot: AI status, integration status, and periodic sync with connected marketplaces. */
 function useBoot() {
-  const olx = useApp((s) => s.integrations.olx?.state);
+  const integrations = useApp((s) => s.integrations);
+  const live = (["olx", "reverb"] as const).filter((m) => integrations[m]?.state === "connected").join(",");
   useEffect(() => {
     checkAi();
     refreshIntegrations();
   }, []);
   useEffect(() => {
-    if (olx !== "connected") return;
-    const run = () => syncMarketplaceThreads("olx").catch(() => {});
+    if (!live) return;
+    const run = () => live.split(",").forEach((m) => syncMarketplaceThreads(m as "olx" | "reverb").catch(() => {}));
     run();
     const t = setInterval(run, 60_000);
     return () => clearInterval(t);
-  }, [olx]);
+  }, [live]);
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
