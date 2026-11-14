@@ -3,7 +3,7 @@ import { analyzePhotos, claudeEnabled } from "@/lib/server/claude";
 
 /** Photos (data URLs) → structured listing draft. 501 when Claude isn't configured. */
 export async function POST(req: Request) {
-  if (!claudeEnabled()) return Response.json({ error: "AI vision is not configured" }, { status: 501 });
+  if (!(await claudeEnabled())) return Response.json({ error: "AI vision is not configured" }, { status: 501 });
   const { photos, hint } = (await req.json()) as { photos: string[]; hint?: string };
   const images = (photos ?? [])
     .map((p) => p.match(/^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/))

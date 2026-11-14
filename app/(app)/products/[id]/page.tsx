@@ -577,7 +577,7 @@ function PhotosCard({ p }: { p: Product }) {
           </button>
         </div>
         <div className="mt-3">
-          <Note>Photos are stored in this browser. Marketplaces that need public image URLs get them only for hosted images.</Note>
+          <Note>Photos stay in this browser until you publish to OLX or eBay — then they&apos;re uploaded so the marketplace can show them.</Note>
         </div>
       </div>
     </Card>

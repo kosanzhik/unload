@@ -6,7 +6,7 @@ import { claudeEnabled, phraseReply } from "@/lib/server/claude";
  * result with the negotiation guard and falls back to the approved text.
  */
 export async function POST(req: Request) {
-  if (!claudeEnabled()) return Response.json({ error: "AI is not configured" }, { status: 501 });
+  if (!(await claudeEnabled())) return Response.json({ error: "AI is not configured" }, { status: 501 });
   const body = await req.json();
   try {
     const reply = await phraseReply(body);

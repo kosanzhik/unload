@@ -102,7 +102,7 @@ function AiStatus() {
       <p className="mt-1">
         {ai.claude
           ? `Claude (${ai.model}) handles vision and wording. Policy rules always decide what may be said.`
-          : "Demo mode: rule-based agent, no AI vision. Add ANTHROPIC_API_KEY to enable Claude."}
+          : "Demo mode: rule-based agent, no AI vision. Claude turns on automatically once AI Gateway credits or an Anthropic key are available."}
       </p>
     </div>
   );

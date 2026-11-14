@@ -170,7 +170,7 @@ export const olxAdapter: MarketplaceAdapter = {
       status: OLX_STATUS[a.status] ?? "moderation",
       note:
         imageUrls.length < product.photos.length
-          ? "Photos taken in this browser aren't hosted publicly yet, so add them in your OLX account."
+          ? "Some photos couldn't be hosted publicly — add them in your OLX account."
           : a.status === "limited" || a.status === "unpaid"
             ? "OLX's free limit for this category is used up — the ad waits for payment in your OLX account."
             : undefined,
@@ -318,7 +318,7 @@ export const ebayAdapter: MarketplaceAdapter = {
       externalId: r.offerId,
       url: `https://www.${ebaySandbox ? "sandbox." : ""}ebay.com/itm/${r.listingId}`,
       status: "active" as const,
-      note: imageUrls.length < product.photos.length ? "Photos taken in this browser aren't hosted publicly, so only hosted photos were sent." : undefined,
+      note: imageUrls.length < product.photos.length ? "Some photos couldn't be hosted publicly, so only hosted photos were sent." : undefined,
     };
   },
   async readStatus(l) {

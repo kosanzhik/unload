@@ -1,6 +1,8 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { getVercelOidcToken } from "@vercel/oidc";
 import { z } from "zod";
 
 /**
@@ -8,16 +10,80 @@ import { z } from "zod";
  * otherwise the app runs its deterministic demo pipeline and says so in the UI.
  */
 
-export const MODEL = "claude-opus-5-5";
+/**
+ * Two ways to reach Claude, tried in order:
+ *  1. ANTHROPIC_API_KEY → Anthropic API directly (claude-opus-5-5, server-side refusal fallbacks).
+ *  2. Vercel AI Gateway with the deployment's OIDC token (anthropic/claude-opus-5.5) —
+ *     needs AI Gateway credits on the Vercel team. Checked with the free /v1/credits endpoint.
+ * Neither available → the app runs its deterministic demo pipeline and says so in the UI.
+ */
+const GATEWAY = "https://ai-gateway.vercel.sh";
+const DIRECT_MODEL = "claude-opus-5-5";
+const GATEWAY_MODEL = "anthropic/claude-opus-5.5";
 
-export function claudeEnabled() {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+type Conn = { client: Anthropic; model: string; direct: boolean };
+
+let direct: Anthropic | null = null;
+async function connect(): Promise<Conn | null> {
+  if (process.env.ANTHROPIC_API_KEY) {
+    direct ??= new Anthropic();
+    return { client: direct, model: DIRECT_MODEL, direct: true };
+  }
+  const token = await getVercelOidcToken().catch(() => process.env.VERCEL_OIDC_TOKEN ?? null);
+  if (!token) return null;
+  return { client: new Anthropic({ baseURL: GATEWAY, apiKey: token }), model: GATEWAY_MODEL, direct: false };
 }
 
-let client: Anthropic | null = null;
-function anthropic() {
-  client ??= new Anthropic();
-  return client;
+let probe: { at: number; ok: boolean } | null = null;
+/** Is Claude usable right now? (cached for 5 minutes; the gateway check costs nothing) */
+export async function claudeStatus(): Promise<{ enabled: boolean; model: string | null; via: "anthropic" | "gateway" | null }> {
+  if (process.env.ANTHROPIC_API_KEY) return { enabled: true, model: DIRECT_MODEL, via: "anthropic" };
+  if (!probe || Date.now() - probe.at > 300_000) {
+    let ok = false;
+    try {
+      const token = await getVercelOidcToken().catch(() => process.env.VERCEL_OIDC_TOKEN ?? null);
+      if (token) {
+        const r = await fetch(`${GATEWAY}/v1/credits`, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+        const j = r.ok ? await r.json() : null;
+        ok = Number(j?.balance ?? 0) > 0;
+      }
+    } catch {}
+    probe = { at: Date.now(), ok };
+  }
+  return probe.ok ? { enabled: true, model: GATEWAY_MODEL, via: "gateway" } : { enabled: false, model: null, via: null };
+}
+
+export async function claudeEnabled() {
+  return (await claudeStatus()).enabled;
+}
+
+/** Structured-output request on whichever connection is available. */
+async function parse<T extends z.ZodType>(
+  schema: T,
+  req: { system: string; messages: Anthropic.MessageParam[]; effort: "low" | "medium"; maxTokens: number },
+): Promise<z.infer<T> | null> {
+  const c = await connect();
+  if (!c) throw new Error("AI is not configured");
+  if (c.direct) {
+    const res = await c.client.beta.messages.parse({
+      model: c.model,
+      max_tokens: req.maxTokens,
+      output_config: { effort: req.effort, format: betaZodOutputFormat(schema) },
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
+      system: req.system,
+      messages: req.messages as Anthropic.Beta.BetaMessageParam[],
+    });
+    return res.stop_reason === "refusal" ? null : (res.parsed_output as z.infer<T> | null);
+  }
+  const res = await c.client.messages.parse({
+    model: c.model,
+    max_tokens: req.maxTokens,
+    output_config: { effort: req.effort, format: zodOutputFormat(schema) },
+    system: req.system,
+    messages: req.messages,
+  });
+  return res.stop_reason === "refusal" ? null : (res.parsed_output as z.infer<T> | null);
 }
 
 /* ---------- Vision: photos → listing draft ---------- */
@@ -59,13 +125,10 @@ Rules:
 - Write in natural American English.`;
 
 export async function analyzePhotos(images: { mediaType: string; data: string }[], hint: string) {
-  const res = await anthropic().beta.messages.parse({
-    model: MODEL,
-    max_tokens: 16000,
-    output_config: { effort: "medium", format: betaZodOutputFormat(Analysis) },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+  const out = await parse(Analysis, {
     system: ANALYZE_SYSTEM,
+    effort: "medium",
+    maxTokens: 16000,
     messages: [
       {
         role: "user",
@@ -78,13 +141,13 @@ export async function analyzePhotos(images: { mediaType: string; data: string }[
               data: img.data,
             },
           })),
-          { type: "text", text: `These photos show one item for sale.${hint ? ` Seller's note: ${hint}` : ""}` },
+          { type: "text" as const, text: `These photos show one item for sale.${hint ? ` Seller's note: ${hint}` : ""}` },
         ],
       },
     ],
   });
-  if (res.stop_reason === "refusal" || !res.parsed_output) throw new Error("The AI couldn't analyze these photos.");
-  return res.parsed_output;
+  if (!out) throw new Error("The AI couldn't analyze these photos.");
+  return out;
 }
 
 /* ---------- Sales agent phrasing ---------- */
@@ -105,13 +168,10 @@ export async function phraseReply(input: {
   facts: unknown;
   history: { role: string; text: string }[];
 }) {
-  const res = await anthropic().beta.messages.parse({
-    model: MODEL,
-    max_tokens: 2000,
-    output_config: { effort: "low", format: betaZodOutputFormat(Reply) },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+  const out = await parse(Reply, {
     system: REPLY_SYSTEM,
+    effort: "low",
+    maxTokens: 2000,
     messages: [
       {
         role: "user",
@@ -124,6 +184,5 @@ export async function phraseReply(input: {
       },
     ],
   });
-  if (res.stop_reason === "refusal" || !res.parsed_output) return null;
-  return res.parsed_output.reply.trim();
+  return out ? out.reply.trim() : null;
 }

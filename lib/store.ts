@@ -306,12 +306,37 @@ export function removeListing(id: string) {
   set((s) => ({ listings: s.listings.filter((l) => l.id !== id) }));
 }
 
+/** Upload browser-only photos to public hosting (only at publish time, for API marketplaces). */
+async function hostPhotos(productId: string): Promise<Product | undefined> {
+  const p = product(productId);
+  if (!p || !p.photos.some((ph) => ph.src.startsWith("data:"))) return p;
+  const photos = await Promise.all(
+    p.photos.map(async (ph) => {
+      if (!ph.src.startsWith("data:")) return ph;
+      try {
+        const r = await fetch("/api/photos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ dataUrl: ph.src, name: ph.name }),
+        });
+        const j = await r.json();
+        return r.ok && j.url ? { ...ph, src: j.url as string } : ph;
+      } catch {
+        return ph;
+      }
+    }),
+  );
+  patchProduct(productId, () => ({ photos }));
+  return product(productId);
+}
+
 export async function publishListing(id: string) {
   const l = getState().listings.find((x) => x.id === id);
-  const p = l && product(l.productId);
+  let p = l && product(l.productId);
   if (!l || !p) return;
   patchListing(id, { status: "publishing", note: undefined });
   try {
+    if (ADAPTERS[l.marketplace].capabilities.publish && l.marketplace !== "mock") p = (await hostPhotos(p.id)) ?? p;
     const r = await ADAPTERS[l.marketplace].publish(l, p);
     patchListing(id, { ...r, publishedAt: now() });
     patchProduct(p.id, () => ({ status: "listed" }));
