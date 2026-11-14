@@ -19,7 +19,7 @@ import type {
 import { putFile } from "./evidence";
 import { knowledgeSheet } from "./knowledge/kb";
 import { listingDescription, listingTitle } from "./listing/drafts";
-import { ADAPTERS, draftListing, mockAdapter, olxContext } from "./marketplaces/registry";
+import { ADAPTERS, draftListing, ebayContext, mockAdapter, olxContext } from "./marketplaces/registry";
 import type { IntegrationStatus } from "./marketplaces/types";
 import { guardReply, money, parseOffer } from "./negotiation/policy";
 import { uid } from "./util";
@@ -29,7 +29,14 @@ import { SAMPLES } from "./vision/demo";
 /* State                                                              */
 /* ================================================================== */
 
-export type Settings = AutopilotSettings & { city: string; contactName: string; phone: string };
+export type Settings = AutopilotSettings & {
+  city: string;
+  contactName: string;
+  phone: string;
+  usCity: string;
+  usState: string;
+  usZip: string;
+};
 
 export type AppState = {
   products: Product[];
@@ -54,6 +61,9 @@ export const DEFAULT_SETTINGS: Settings = {
   city: "Алматы",
   contactName: "",
   phone: "",
+  usCity: "",
+  usState: "",
+  usZip: "",
 };
 
 const EMPTY: AppState = {
@@ -83,7 +93,13 @@ function load() {
       state = { ...EMPTY, ...s, settings: { ...DEFAULT_SETTINGS, ...s.settings }, integrations: {}, ai: EMPTY.ai };
     }
   } catch {}
-  Object.assign(olxContext, { city: state.settings.city, contactName: state.settings.contactName, phone: state.settings.phone });
+  applyContexts();
+}
+
+function applyContexts() {
+  const st = state.settings;
+  Object.assign(olxContext, { city: st.city, contactName: st.contactName, phone: st.phone });
+  Object.assign(ebayContext, { city: st.usCity, stateOrProvince: st.usState, postalCode: st.usZip, country: "US" });
 }
 
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
@@ -165,8 +181,7 @@ export function notify(n: Omit<Notification, "id" | "createdAt" | "read">) {
 
 export function updateSettings(patch: Partial<Settings>) {
   set((s) => ({ settings: { ...s.settings, ...patch } }));
-  const st = getState().settings;
-  Object.assign(olxContext, { city: st.city, contactName: st.contactName, phone: st.phone });
+  applyContexts();
 }
 
 export async function checkAi() {

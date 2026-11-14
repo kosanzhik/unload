@@ -20,13 +20,13 @@ const CAPS: [keyof Capabilities, string][] = [
   ["sendMessage", "Send replies"],
 ];
 
-const OLX_MSG: Record<string, string> = {
-  connected: "OLX account connected.",
-  denied: "OLX authorization was cancelled.",
-  invalid_state: "OLX sign-in expired or was tampered with. Try again.",
-  not_configured: "OLX Partner API credentials aren't configured on this deployment.",
-  error: "OLX sign-in failed.",
-};
+const MSG = (name: string): Record<string, string> => ({
+  connected: `${name} account connected.`,
+  denied: `${name} authorization was cancelled.`,
+  invalid_state: `${name} sign-in expired or was tampered with. Try again.`,
+  not_configured: `${name} API credentials aren't configured on this deployment yet.`,
+  error: `${name} sign-in failed.`,
+});
 
 export default function MarketplacesPage() {
   return (
@@ -40,7 +40,8 @@ function Marketplaces() {
   const params = useSearchParams();
   const integrations = useApp((s) => s.integrations);
   const [checking, setChecking] = useState(false);
-  const olx = params.get("olx");
+  const which = params.get("olx") ? "OLX" : params.get("ebay") ? "eBay" : null;
+  const result = params.get("olx") ?? params.get("ebay");
 
   return (
     <>
@@ -60,10 +61,10 @@ function Marketplaces() {
           </Button>
         }
       />
-      {olx && (
+      {which && result && (
         <div className="mb-5">
-          <Note tone={olx === "connected" ? "brand" : "warning"}>
-            {OLX_MSG[olx] ?? "OLX sign-in finished."} {params.get("message") ?? ""}
+          <Note tone={result === "connected" ? "brand" : "warning"}>
+            {MSG(which)[result] ?? `${which} sign-in finished.`} {params.get("message") ?? ""}
           </Note>
         </div>
       )}
@@ -132,12 +133,12 @@ function MarketCard({ id, status }: { id: MarketplaceId; status?: { state: strin
         )}
         {state === "requires_authorization" && (
           <Button size="sm" disabled={busy} onClick={() => run(() => connectMarketplace(id), `${a.name} connected`)}>
-            {busy && <Loader2 className="size-4 animate-spin" />} {id === "olx" ? "Sign in with OLX" : "Connect"}
+            {busy && <Loader2 className="size-4 animate-spin" />} {id === "mock" ? "Connect" : `Sign in with ${a.name}`}
           </Button>
         )}
         {a.docs && (
           <a href={a.docs} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-xs font-semibold text-brand">
-            {id === "olx" ? "Partner API docs" : "Official site"} <ExternalLink className="size-3" />
+            {id === "olx" || id === "ebay" ? "API docs" : "Official site"} <ExternalLink className="size-3" />
           </a>
         )}
       </div>

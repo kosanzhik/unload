@@ -250,14 +250,94 @@ function manual(id: MarketplaceId, name: string, market: string, titleMax: numbe
   };
 }
 
-export const ebayAdapter = manual(
+/* ------------------------------------------------------------------ */
+/* eBay — official Sell APIs via our server routes; manual until keys  */
+/* ------------------------------------------------------------------ */
+
+const ebayManual = manual(
   "ebay",
   "eBay",
   "ebay.com · USD",
   80,
-  "eBay's official Sell APIs need an approved developer app and seller consent. That integration isn't built yet, so you export the draft and post it yourself.",
-  "https://developer.ebay.com/api-docs/sell/static/selling-ig-landing.html",
+  "eBay API keys aren't configured on this deployment yet, so you export the draft and post it yourself.",
+  "https://developer.ebay.com/api-docs/sell/inventory/overview.html",
 );
+let ebayApi = false;
+let ebaySandbox = true;
+const EBAY_CAPS: Capabilities = { publish: true, update: true, readStatus: true, availability: true, threads: false, sendMessage: false };
+
+/** Seller location eBay needs for a merchant location (from Autopilot settings). */
+export const ebayContext = { city: "", stateOrProvince: "", postalCode: "", country: "US" };
+
+export const ebayAdapter: MarketplaceAdapter = {
+  ...ebayManual,
+  get capabilities() {
+    return ebayApi ? EBAY_CAPS : NONE;
+  },
+  async status(): Promise<IntegrationStatus> {
+    const s = await api<{ configured: boolean; connected: boolean; env: string }>("/api/ebay/status");
+    ebayApi = s.configured;
+    ebaySandbox = s.env === "sandbox";
+    if (!s.configured) return ebayManual.status();
+    const env = s.env === "sandbox" ? " (Sandbox — test listings only)" : "";
+    return s.connected
+      ? { state: "connected", detail: `Connected through eBay's official OAuth + Sell APIs${env}. Buyer messages stay on eBay.` }
+      : { state: "requires_authorization", detail: `Sign in with eBay to let UNLOAD publish for you${env}.` };
+  },
+  async connect() {
+    window.location.assign(new URL("/api/ebay/connect", window.location.origin).toString());
+  },
+  async disconnect() {
+    if (ebayApi) await api("/api/ebay/disconnect", { method: "POST" });
+  },
+  async publish(listing: Listing, product: Product) {
+    if (!ebayApi) return ebayManual.publish(listing, product);
+    if (listing.currency !== "USD") throw new Error("eBay US listings must be priced in USD.");
+    if (listing.price == null) throw new Error("Set an asking price first.");
+    if (!ebayContext.postalCode) throw new Error("Add your US ZIP code in Autopilot settings (eBay needs an item location).");
+    const imageUrls = product.photos
+      .map((p) => (p.src.startsWith("/") ? `${window.location.origin}${p.src}` : p.src))
+      .filter((u) => /^https:\/\//.test(u));
+    const aspects = Object.fromEntries(product.attributes.filter((a) => a.name && a.value).map((a) => [a.name, [a.value]]));
+    const r = await api<{ offerId: string; listingId: string }>("/api/ebay/offers", {
+      method: "POST",
+      json: {
+        sku: listing.id,
+        title: listing.title,
+        description: listing.description,
+        condition: product.condition,
+        brand: product.brand || undefined,
+        aspects,
+        imageUrls,
+        price: listing.price,
+        categoryQuery: product.title,
+        location: ebayContext,
+      },
+    });
+    return {
+      externalId: r.offerId,
+      url: `https://www.${ebaySandbox ? "sandbox." : ""}ebay.com/itm/${r.listingId}`,
+      status: "active" as const,
+      note: imageUrls.length < product.photos.length ? "Photos taken in this browser aren't hosted publicly, so only hosted photos were sent." : undefined,
+    };
+  },
+  async readStatus(l) {
+    if (!ebayApi || !l.externalId) return {};
+    const o = await api<{ status: string; listingStatus?: string }>(`/api/ebay/offers/${l.externalId}`);
+    const st: ListingStatus = o.status === "PUBLISHED" ? (o.listingStatus === "ENDED" ? "inactive" : "active") : "inactive";
+    return { status: st };
+  },
+  async update(l) {
+    if (!ebayApi || !l.externalId) return;
+    await api(`/api/ebay/offers/${l.externalId}`, { method: "PUT", json: { description: l.description, price: l.price } });
+  },
+  async setAvailability(l, active) {
+    if (!ebayApi || !l.externalId) return ebayManual.setAvailability(l, active);
+    if (active) throw new Error("A withdrawn eBay offer can't be reactivated from here — publish it again.");
+    await api(`/api/ebay/offers/${l.externalId}/withdraw`, { method: "POST" });
+    return "sold";
+  },
+};
 export const facebookAdapter = manual(
   "facebook",
   "Facebook Marketplace",

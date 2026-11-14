@@ -103,6 +103,22 @@ export default function SettingsPage() {
               <input id="cname" className="field" value={s.contactName} onChange={(e) => set({ contactName: e.target.value })} />
             </div>
             <div>
+              <Label htmlFor="uszip" hint="eBay item location">
+                US ZIP code
+              </Label>
+              <input id="uszip" className="field" inputMode="numeric" value={s.usZip} onChange={(e) => set({ usZip: e.target.value })} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="uscity">US city</Label>
+                <input id="uscity" className="field" value={s.usCity} onChange={(e) => set({ usCity: e.target.value })} />
+              </div>
+              <div>
+                <Label htmlFor="usstate">State</Label>
+                <input id="usstate" className="field" maxLength={2} placeholder="CA" value={s.usState} onChange={(e) => set({ usState: e.target.value.toUpperCase() })} />
+              </div>
+            </div>
+            <div>
               <Label htmlFor="phone" hint="optional">
                 Phone on OLX listings
               </Label>
