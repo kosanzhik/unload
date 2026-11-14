@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+/* Design tokens from design/unload.pen */
+@theme {
+  --color-ink-900: #1e2823;
+  --color-ink-650: #53605a;
+  --color-ink-450: #7d8a83;
+  --color-canvas: #f7f8f3;
+  --color-surface: #ffffff;
+  --color-soft: #eff1e9;
+  --color-line: #dbe0d8;
+  --color-lime-400: #ccf36c;
+  --color-lime-100: #f1f9db;
+  --color-coral-400: #ff896d;
+  --color-success: #246746;
+  --color-warning: #8b5517;
+  --color-warning-100: #fbf1e1;
+  --color-error: #b33e43;
+  --color-error-100: #fbeaea;
+
+  --font-display: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-button: 14px;
+  --radius-card: 20px;
+  --radius-photo: 16px;
+}
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink-900);
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+@layer components {
+  .field {
+    @apply w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink-900 outline-none transition placeholder:text-ink-450 focus:border-ink-900 focus:ring-2 focus:ring-lime-400;
+  }
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.animate-toast {
+  animation: toast-in 0.2s ease-out;
+}
